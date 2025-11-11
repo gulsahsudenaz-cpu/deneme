@@ -60,7 +60,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Force HTTPS in production (skip for health check and WebSocket)
-        if settings.FORCE_HTTPS and settings.APP_ENV == "prod" and not request.url.path.startswith("/ws/"):
+        if settings.FORCE_HTTPS and settings.APP_ENV == "prod" and not request.url.path.startswith("/ws/") and request.url.path != "/health":
             # Check X-Forwarded-Proto header (for reverse proxy)
             proto = request.headers.get("x-forwarded-proto", request.url.scheme)
             if proto != "https":
@@ -197,15 +197,8 @@ async def periodic_cleanup():
 
 @app.get("/health")
 async def health():
-    """Simple health check for Railway deployment"""
-    try:
-        # Quick database check
-        async with session_scope() as s:
-            await s.execute(select(1))
-        return {"status": "ok"}
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service unavailable")
+    """Ultra-simple health check for Railway"""
+    return {"status": "ok"}
 
 @app.get("/health/detailed")
 async def health_detailed():
