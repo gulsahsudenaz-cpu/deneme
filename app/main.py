@@ -200,6 +200,17 @@ async def health():
     """Ultra-simple health check for Railway"""
     return {"status": "ok"}
 
+@app.get("/debug")
+async def debug_info():
+    """Debug endpoint to check file paths"""
+    import os
+    return {
+        "cwd": os.getcwd(),
+        "templates_exist": os.path.exists("templates/index.html"),
+        "static_exist": os.path.exists("static/js/client.js"),
+        "files": os.listdir(".") if os.path.exists(".") else "not found"
+    }
+
 @app.get("/health/detailed")
 async def health_detailed():
     """Detailed health check endpoint with system status"""
