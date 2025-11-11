@@ -1,0 +1,157 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.bak
+
+# Docker
+.dockerignore
+
+# Deployment
+deploy.log
+
+# Monitoring
+*.pid
+
+# Ignore everything outside project directory
+/*
+!app/
+!static/
+!templates/
+!migrations/
+!tests/
+!*.py
+!*.md
+!*.txt
+!*.yml
+!*.yaml
+!*.toml
+!*.sh
+!*.html
+!*.css
+!*.js
+!*.sql
+!*.dockerfile
+!Dockerfile
+!Makefile
+!README.md
+!.gitignore
+!env.example
+!requirements.txt
+!railway.toml
+!docker-compose.yml
+!docker-compose.prod.yml
+!deploy.sh
+!validate_env.py
+
+# Ignore parent directories
+../*
+!/../
+../../*
+!/../../
+../../../*
+!/../../../
+../../../../*
+!/../../../../
+
+# Windows system files
+$Recycle.Bin/
+$SysReset/
+$WINDOWS.~BT/
+$WinREAgent/
+Program Files/
+Program Files (x86)/
+ProgramData/
+Users/
+Windows/
+*.sys
+*.log
+*.tmp
+*.dat
+*.ini
+*.lnk
+*.7z
+*.pdf
+*.png
+*.jpg
+*.cdr
+*.ai
+*.odt
+*.docx
+*.xml
+*.txt
+!README.md
+!requirements.txt
+!.gitignore
+!env.example
+!validate_env.py
+!*.py
+!*.md
+!*.sql
+!*.sh
+!*.yml
+!*.yaml
+!*.toml
+!*.html
+!*.css
+!*.js
+!Dockerfile
+!Makefile
+!railway.toml
+!docker-compose.yml
+!docker-compose.prod.yml
+!deploy.sh

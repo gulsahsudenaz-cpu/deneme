@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#7c3aed" />
+  <title>Premium Destek Admin</title>
+  <link rel="stylesheet" href="/static/css/admin.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body data-app="admin">
+  <!-- Katman 1: OTP Giriş Ekranı -->
+  <div id="loginModal" class="login-layer">
+    <div class="login-card">
+      <div class="login-icon">
+        <i class="fas fa-shield-alt"></i>
+      </div>
+      <h2 class="login-title">Admin Girişi</h2>
+      <p class="login-text">Telegram'dan OTP kodu isteyin ve girin.</p>
+      
+      <div class="login-actions">
+        <button id="reqOtpBtn" class="login-btn secondary">
+          <i class="fas fa-key"></i> Kod İste
+        </button>
+      </div>
+      
+      <form id="loginForm" class="login-form">
+        <input 
+          id="otpInput" 
+          type="text" 
+          maxlength="6" 
+          placeholder="6 haneli kod" 
+          class="login-input"
+        />
+        <button type="submit" id="loginBtn" class="login-btn">
+          <i class="fas fa-sign-in-alt"></i> Giriş Yap
+        </button>
+      </form>
+      
+      <p id="loginMsg" class="login-message"></p>
+    </div>
+  </div>
+
+  <!-- Katman 2: Kullanıcı Listesi -->
+  <div class="users-layer hidden">
+    <header class="admin-header">
+      <div class="header-left">
+        <div class="admin-avatar">
+          <i class="fas fa-headphones"></i>
+        </div>
+        <div class="admin-info">
+          <h1>Premium Destek Paneli</h1>
+          <div class="header-stats">
+            <div class="stat-badge">
+              <i class="fas fa-users"></i>
+              <span id="activeUsers">0 Aktif</span>
+            </div>
+            <div class="stat-badge">
+              <i class="fas fa-comments"></i>
+              <span id="totalMessages">0 Mesaj</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="header-actions">
+        <div class="connection-status">
+          <span class="status-dot" id="wsDot"></span>
+          <span id="wsTxt">Bağlı değil</span>
+        </div>
+        <button class="header-btn" id="refreshBtn" title="Yenile">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+        <button class="header-btn logout-btn" id="logoutBtn" title="Çıkış">
+          <i class="fas fa-sign-out-alt"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="admin-main">
+      <aside class="users-panel">
+        <div class="panel-header">
+          <h3>Aktif Sohbetler</h3>
+          <div class="search-box">
+            <i class="fas fa-search search-icon"></i>
+            <input type="text" id="searchInput" placeholder="Kullanıcı ara..." class="search-input">
+          </div>
+        </div>
+        
+        <div class="users-list" id="convList">
+          <div class="empty-state">
+            <i class="fas fa-comments"></i>
+            <h4>Henüz sohbet yok</h4>
+            <p>Aktif sohbet bulunmuyor</p>
+          </div>
+        </div>
+      </aside>
+
+      <section class="chat-preview">
+        <div class="preview-content">
+          <div class="preview-icon">
+            <i class="fas fa-comments"></i>
+          </div>
+          <h3>Sohbet Seçin</h3>
+          <p>Soldaki listeden bir sohbet seçerek mesajlaşmaya başlayın</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Katman 3: Sohbet Ekranı -->
+  <div class="chat-layer hidden">
+    <header class="chat-header">
+      <button class="back-btn" id="backBtn">
+        <i class="fas fa-arrow-left"></i>
+      </button>
+      
+      <div class="chat-user-info">
+        <div class="user-avatar" id="chatUserAvatar">
+          <i class="fas fa-user"></i>
+        </div>
+        <div class="user-details">
+          <h2 id="convTitle">Sohbet seçiniz</h2>
+          <div class="user-status" id="userStatus">Çevrimdışı</div>
+        </div>
+      </div>
+
+      <div class="chat-actions">
+        <button class="action-btn danger" id="delBtn" title="Konuşmayı Sil">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="chat-main">
+      <div class="messages-container" id="adminMessages">
+        <div class="empty-state">
+          <i class="fas fa-comment-dots"></i>
+          <h4>Henüz mesaj yok</h4>
+          <p>İlk mesajı siz gönderin</p>
+        </div>
+      </div>
+
+      <form id="adminForm" class="message-form">
+        <div class="input-container">
+          <textarea 
+            id="adminInput" 
+            placeholder="Yanıt yaz..." 
+            maxlength="2000"
+            class="message-input"
+          ></textarea>
+          <button type="submit" class="send-btn">
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#7c3aed" />
+  <title>Premium Canlı Destek</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body data-app="client">
+  <!-- Katman 1: Hoş Geldiniz Ekranı -->
+  <div class="welcome-layer" id="welcomeLayer">
+    <div class="welcome-card">
+      <div class="welcome-icon">
+        <i class="fas fa-headset"></i>
+      </div>
+      <h1 class="welcome-title">Premium Destek</h1>
+      <p class="welcome-text">Size nasıl yardımcı olabiliriz?</p>
+      
+      <div class="welcome-form">
+        <div class="input-group">
+          <i class="fas fa-user input-icon"></i>
+          <input 
+            id="displayName" 
+            type="text" 
+            maxlength="80" 
+            placeholder="Adınızı girin" 
+            class="name-input"
+          />
+        </div>
+        <button id="startBtn" class="start-btn">
+          <i class="fas fa-comments"></i>
+          Sohbete Başla
+        </button>
+      </div>
+      
+      <div class="welcome-features">
+        <div class="feature">
+          <i class="fas fa-shield-alt"></i>
+          <span>Güvenli & Özel</span>
+        </div>
+        <div class="feature">
+          <i class="fas fa-bolt"></i>
+          <span>Anında Yanıt</span>
+        </div>
+        <div class="feature">
+          <i class="fas fa-infinity"></i>
+          <span>7/24 Destek</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Katman 2: Sohbet Ekranı -->
+  <div class="chat-layer hidden" id="chatLayer">
+    <header class="chat-header">
+      <div class="header-left">
+        <div class="chat-avatar">
+          <i class="fas fa-headset"></i>
+        </div>
+        <div class="chat-info">
+          <h2>Canlı Destek</h2>
+          <div class="connection-status">
+            <span id="statusDot" class="status-dot offline"></span>
+            <span id="statusText">Bağlanıyor...</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="header-actions">
+        <button class="action-btn" id="minimizeBtn" title="Küçült">
+          <i class="fas fa-minus"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="chat-main">
+      <div class="messages-container" id="messages">
+        <div class="empty-state">
+          <i class="fas fa-comments"></i>
+          <h3>Sohbete Hoş Geldiniz</h3>
+          <p>Destek ekibimiz en kısa sürede size yardımcı olacaktır</p>
+        </div>
+      </div>
+
+      <form id="msgForm" class="message-form">
+        <div class="input-container">
+          <textarea 
+            id="msgInput" 
+            placeholder="Mesajınızı yazın..." 
+            maxlength="2000"
+            class="message-input"
+          ></textarea>
+          <button type="submit" class="send-btn">
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/client.js"></script>
+</body>
+</html>
