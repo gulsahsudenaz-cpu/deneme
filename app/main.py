@@ -219,6 +219,22 @@ async def favicon():
     """Simple favicon response"""
     return Response(content="", media_type="image/x-icon")
 
+@app.get("/ws-test")
+async def websocket_test():
+    """Test WebSocket endpoint availability"""
+    return {
+        "websocket_endpoints": ["/ws/client", "/ws/admin"],
+        "server_host": "0.0.0.0:8080",
+        "websocket_manager": {
+            "clients": len(manager.clients),
+            "admins": len(manager.admins),
+            "max_clients": manager.max_clients,
+            "max_admins": manager.max_admins
+        },
+        "cors_origins": settings.ALLOWED_ORIGINS,
+        "instructions": "Try connecting to wss://your-domain/ws/client"
+    }
+
 @app.get("/health/detailed")
 async def health_detailed():
     """Detailed health check endpoint with system status"""
@@ -886,11 +902,12 @@ app.include_router(telegram_router, prefix="")
 # WebSockets
 @app.websocket("/ws/client")
 async def ws_client(ws: WebSocket):
+    logger.info(f"WebSocket client endpoint hit - Headers: {dict(ws.headers)}")
+    logger.info(f"Client info: {ws.client}")
     try:
         await handle_client(ws)
     except WebSocketDisconnect:
-        # Normal disconnect, no need to log
-        pass
+        logger.info("Client WebSocket disconnected normally")
     except Exception as e:
         logger.error(f"Error in client WebSocket handler: {e}", exc_info=True)
         try:
@@ -903,8 +920,14 @@ async def ws_client(ws: WebSocket):
 
 @app.websocket("/ws/admin")
 async def ws_admin(ws: WebSocket, authorization: str | None = Header(default=None), token: str | None = Query(default=None)):
+    logger.info(f"WebSocket admin endpoint hit - Headers: {dict(ws.headers)}")
+    logger.info(f"Client info: {ws.client}")
+    logger.info(f"Authorization header: {authorization}")
+    logger.info(f"Token query param: {token[:10] if token else None}...")
+    
     # Accept connection first (WebSocket protocol requirement)
     await ws.accept()
+    logger.info("Admin WebSocket connection accepted")
     
     # Check IP whitelist if configured
     if settings.ADMIN_IP_WHITELIST:

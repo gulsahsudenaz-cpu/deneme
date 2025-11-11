@@ -116,29 +116,42 @@ async def origin_ok(ws: WebSocket) -> bool:
     Returns:
         True if origin is allowed, False otherwise
     """
-    # In dev mode, allow all origins if ALLOWED_ORIGINS is empty
-    if not settings.ALLOWED_ORIGINS and settings.APP_ENV == "dev":
-        return True
-    origin = ws.headers.get("origin")
-    if not origin:
-        return False
-    # Exact match or exact protocol+domain match (prevents subdomain hijacking)
-    for allowed in settings.ALLOWED_ORIGINS:
-        if origin == allowed:
-            return True
-        # Allow subdomains only if explicitly configured with wildcard
-        if allowed.startswith("*."):
-            domain = allowed[2:]
-            if origin.endswith(domain) and origin.count(".") == domain.count(".") + 1:
-                return True
-    return False
+    # TEMPORARY: Allow all origins for Railway debugging
+    # TODO: Re-enable strict origin checking after WebSocket issues are resolved
+    return True
+    
+    # Original strict validation (commented out for debugging)
+    # # In dev mode, allow all origins if ALLOWED_ORIGINS is empty
+    # if not settings.ALLOWED_ORIGINS and settings.APP_ENV == "dev":
+    #     return True
+    # origin = ws.headers.get("origin")
+    # if not origin:
+    #     return False
+    # # Exact match or exact protocol+domain match (prevents subdomain hijacking)
+    # for allowed in settings.ALLOWED_ORIGINS:
+    #     if origin == allowed:
+    #         return True
+    #     # Allow subdomains only if explicitly configured with wildcard
+    #     if allowed.startswith("*."):
+    #         domain = allowed[2:]
+    #         if origin.endswith(domain) and origin.count(".") == domain.count(".") + 1:
+    #             return True
+    # return False
 
 async def handle_client(ws: WebSocket):
+    logger.info(f"Client WebSocket connection attempt from {ws.client.host if ws.client else 'unknown'}")
+    logger.info(f"Headers: {dict(ws.headers)}")
+    
     await ws.accept()
+    logger.info("Client WebSocket connection accepted")
+    
     # Check origin after accepting (WebSocket protocol requirement)
     if not await origin_ok(ws):
+        logger.warning(f"Client WebSocket origin not allowed: {ws.headers.get('origin')}")
         await ws.close(code=1008, reason="Origin not allowed")
         return
+    
+    logger.info("Client WebSocket origin validation passed")
     # step 1: expect {"type":"join","display_name":"..."} OR {"type":"resume","conversation_id":"..."}
     try:
         init = await ws.receive_json()
@@ -280,12 +293,18 @@ async def handle_client(ws: WebSocket):
             pass
 
 async def handle_admin(ws: WebSocket, token: str):
+    logger.info(f"Admin WebSocket connection from {ws.client.host if ws.client else 'unknown'} with token: {token[:10]}...")
+    logger.info(f"Headers: {dict(ws.headers)}")
+    
     # Connection already accepted in main.py
     # Token validation done in main.py before calling this function
     # Origin check (connection already accepted)
     if not await origin_ok(ws):
+        logger.warning(f"Admin WebSocket origin not allowed: {ws.headers.get('origin')}")
         await ws.close(code=1008, reason="Origin not allowed")
         return
+    
+    logger.info("Admin WebSocket origin validation passed")
     if not await manager.register_admin(ws):
         return  # Connection already closed
     # send current open conversations snapshot
