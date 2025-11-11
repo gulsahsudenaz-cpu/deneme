@@ -7,8 +7,10 @@ class Settings(BaseSettings):
     APP_ENV: str = "dev"
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
-    ALLOWED_ORIGINS: List[str] = []
-
+    
+    # ✅ FIX: Change List[str] to str to avoid Pydantic JSON parsing
+    ALLOWED_ORIGINS: str = ""  # Comma-separated string
+    
     DATABASE_URL: str
 
     SESSION_IDLE_MINUTES: int = 30
@@ -42,9 +44,9 @@ class Settings(BaseSettings):
     MAX_WS_MESSAGE_SIZE: int = 64 * 1024  # 64KB
     MAX_JSON_PAYLOAD_SIZE: int = 512 * 1024  # 512KB
     
-    # IP Whitelisting (optional, comma-separated)
-    ADMIN_IP_WHITELIST: List[str] = []  # Empty = no whitelist
-    TELEGRAM_WEBHOOK_IP_WHITELIST: List[str] = []  # Empty = no whitelist (Telegram IPs should be validated)
+    # ✅ FIX: Change List[str] to str to avoid Pydantic JSON parsing
+    ADMIN_IP_WHITELIST: str = ""  # Comma-separated string
+    TELEGRAM_WEBHOOK_IP_WHITELIST: str = ""  # Comma-separated string
     
     # Session management
     SESSION_IDLE_TIMEOUT_MINUTES: int = 30  # Idle timeout for sessions
@@ -105,19 +107,30 @@ def get_settings() -> Settings:
         if len(s.CSRF_SECRET_KEY) < 32:
             raise ValueError("CSRF_SECRET_KEY must be at least 32 characters long if CSRF_ENABLED is True")
     
-    # Parse ALLOWED_ORIGINS from env (comma-separated string)
-    raw = os.getenv("ALLOWED_ORIGINS", "")
-    if raw:
-        origins = [o.strip() for o in raw.split(",") if o.strip()]
-        s.ALLOWED_ORIGINS = origins
-    # Parse ADMIN_IP_WHITELIST from env
-    raw = os.getenv("ADMIN_IP_WHITELIST", "")
-    if raw:
-        s.ADMIN_IP_WHITELIST = [ip.strip() for ip in raw.split(",") if ip.strip()]
-    # Parse TELEGRAM_WEBHOOK_IP_WHITELIST from env
-    raw = os.getenv("TELEGRAM_WEBHOOK_IP_WHITELIST", "")
-    if raw:
-        s.TELEGRAM_WEBHOOK_IP_WHITELIST = [ip.strip() for ip in raw.split(",") if ip.strip()]
+    # ✅ FIX: Parse comma-separated strings to lists and replace in instance
+    # This maintains backward compatibility - settings.ALLOWED_ORIGINS will return List[str]
+    
+    # Parse ALLOWED_ORIGINS
+    if s.ALLOWED_ORIGINS:
+        parsed_origins = [o.strip() for o in s.ALLOWED_ORIGINS.split(",") if o.strip()]
+    else:
+        parsed_origins = []
+    s.__dict__['ALLOWED_ORIGINS'] = parsed_origins
+    
+    # Parse ADMIN_IP_WHITELIST
+    if s.ADMIN_IP_WHITELIST:
+        parsed_admin_ips = [ip.strip() for ip in s.ADMIN_IP_WHITELIST.split(",") if ip.strip()]
+    else:
+        parsed_admin_ips = []
+    s.__dict__['ADMIN_IP_WHITELIST'] = parsed_admin_ips
+    
+    # Parse TELEGRAM_WEBHOOK_IP_WHITELIST
+    if s.TELEGRAM_WEBHOOK_IP_WHITELIST:
+        parsed_telegram_ips = [ip.strip() for ip in s.TELEGRAM_WEBHOOK_IP_WHITELIST.split(",") if ip.strip()]
+    else:
+        parsed_telegram_ips = []
+    s.__dict__['TELEGRAM_WEBHOOK_IP_WHITELIST'] = parsed_telegram_ips
+    
     return s
 
 settings = get_settings()
