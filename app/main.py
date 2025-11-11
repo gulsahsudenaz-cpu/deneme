@@ -77,7 +77,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.FORCE_HTTPS and settings.APP_ENV == "prod":
             resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         csp_origins = ' '.join(settings.ALLOWED_ORIGINS) if settings.ALLOWED_ORIGINS else ''
-        resp.headers["Content-Security-Policy"] = f"default-src {settings.CSP_DEFAULT_SRC}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' {csp_origins} wss: ws:;"
+        resp.headers["Content-Security-Policy"] = f"default-src {settings.CSP_DEFAULT_SRC}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' {csp_origins} wss: ws:;"
         return resp
 
 # Rate limiting middleware for REST API
