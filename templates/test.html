@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔧 System Test Dashboard - Private Support Chat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2rem;
+            color: #667eea;
+        }
+        
+        .loading i {
+            font-size: 2rem;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+            display: block;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .results {
+            padding: 30px;
+            display: none;
+        }
+        
+        .overall-status {
+            text-align: center;
+            padding: 30px;
+            margin-bottom: 30px;
+            border-radius: 15px;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        
+        .status-pass {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+        
+        .status-warn {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+            color: white;
+        }
+        
+        .status-fail {
+            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+            color: white;
+        }
+        
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .summary-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+        
+        .summary-card h3 {
+            font-size: 2rem;
+            margin-bottom: 5px;
+            color: #2c3e50;
+        }
+        
+        .summary-card p {
+            color: #6c757d;
+            font-weight: 500;
+        }
+        
+        .test-categories {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        
+        .test-category {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .category-header {
+            padding: 20px;
+            background: linear-gradient(135deg, #495057 0%, #6c757d 100%);
+            color: white;
+            font-weight: bold;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .test-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #f8f9fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .test-item:last-child {
+            border-bottom: none;
+        }
+        
+        .test-name {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .test-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+        
+        .test-message {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .status-icon {
+            font-size: 1.2rem;
+        }
+        
+        .pass { color: #28a745; }
+        .fail { color: #dc3545; }
+        .warn { color: #ffc107; }
+        .info { color: #17a2b8; }
+        
+        .timestamp {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 0.9rem;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px;
+            border: 1px solid #f5c6cb;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .test-categories {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-cogs"></i> System Test Dashboard</h1>
+            <p>Comprehensive testing suite for Private Support Chat System</p>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" onclick="runComprehensiveTest()">
+                <i class="fas fa-play"></i> Run Full System Test
+            </button>
+            <button class="btn btn-secondary" onclick="runQuickTest()">
+                <i class="fas fa-bolt"></i> Quick Health Check
+            </button>
+            <button class="btn btn-secondary" onclick="testWebSocket()">
+                <i class="fas fa-plug"></i> Test WebSocket
+            </button>
+            <button class="btn btn-secondary" onclick="testTelegram()">
+                <i class="fab fa-telegram"></i> Test Telegram
+            </button>
+            <button class="btn btn-secondary" onclick="clearResults()">
+                <i class="fas fa-trash"></i> Clear Results
+            </button>
+        </div>
+        
+        <div class="loading" id="loading">
+            <i class="fas fa-cog"></i>
+            <div>Running comprehensive system tests...</div>
+            <div style="font-size: 0.9rem; margin-top: 10px; opacity: 0.7;">This may take 10-30 seconds</div>
+        </div>
+        
+        <div class="error-message" id="errorMessage"></div>
+        
+        <div class="results" id="results">
+            <!-- Results will be populated here -->
+        </div>
+    </div>
+
+    <script>
+        let testResults = null;
+        
+        async function runComprehensiveTest() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/api/test/comprehensive');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                testResults = await response.json();
+                displayResults(testResults);
+            } catch (error) {
+                showError(`Test failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function runQuickTest() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/health');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const healthData = await response.json();
+                displayQuickResults(healthData);
+            } catch (error) {
+                showError(`Health check failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function testWebSocket() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/client`;
+                
+                const ws = new WebSocket(wsUrl);
+                
+                const testResult = await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        ws.close();
+                        reject(new Error('WebSocket connection timeout'));
+                    }, 5000);
+                    
+                    ws.onopen = () => {
+                        clearTimeout(timeout);
+                        ws.close();
+                        resolve('✅ WebSocket connection successful');
+                    };
+                    
+                    ws.onerror = (error) => {
+                        clearTimeout(timeout);
+                        reject(new Error('WebSocket connection failed'));
+                    };
+                });
+                
+                displaySimpleResult('WebSocket Test', testResult);
+            } catch (error) {
+                showError(`WebSocket test failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function testTelegram() {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const response = await fetch('/api/admin/request_otp', {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                const status = result.sent ? '✅ Telegram API accessible' : '❌ Telegram API failed';
+                displaySimpleResult('Telegram Test', status);
+            } catch (error) {
+                showError(`Telegram test failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            
+            let html = `
+                <div class="overall-status ${getStatusClass(data.overall_status)}">
+                    ${data.overall_status}
+                </div>
+                
+                <div class="summary">
+                    <div class="summary-card">
+                        <h3>${data.summary.total_tests}</h3>
+                        <p>Total Tests</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>${data.summary.passed}</h3>
+                        <p>Passed</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>${data.summary.failed}</h3>
+                        <p>Failed</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>${data.summary.success_rate}</h3>
+                        <p>Success Rate</p>
+                    </div>
+                </div>
+                
+                <div class="test-categories">
+            `;
+            
+            const categoryIcons = {
+                database: 'fas fa-database',
+                cache: 'fas fa-memory',
+                telegram: 'fab fa-telegram',
+                websocket: 'fas fa-plug',
+                rate_limiting: 'fas fa-tachometer-alt',
+                authentication: 'fas fa-lock',
+                environment: 'fas fa-cog',
+                system: 'fas fa-server',
+                filesystem: 'fas fa-folder'
+            };
+            
+            for (const [category, tests] of Object.entries(data.tests)) {
+                const icon = categoryIcons[category] || 'fas fa-question';
+                html += `
+                    <div class="test-category">
+                        <div class="category-header">
+                            <i class="${icon}"></i>
+                            ${category.charAt(0).toUpperCase() + category.slice(1).replace('_', ' ')}
+                        </div>
+                `;
+                
+                for (const [testName, testResult] of Object.entries(tests)) {
+                    const statusClass = getTestStatusClass(testResult.status);
+                    const statusIcon = getStatusIcon(testResult.status);
+                    
+                    html += `
+                        <div class="test-item">
+                            <div>
+                                <div class="test-name">${formatTestName(testName)}</div>
+                                <div class="test-message">${testResult.message}</div>
+                            </div>
+                            <div class="test-status ${statusClass}">
+                                <span class="status-icon">${statusIcon}</span>
+                                ${testResult.status}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+            }
+            
+            html += `
+                </div>
+                <div class="timestamp">
+                    Last updated: ${new Date(data.timestamp).toLocaleString()}
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+        
+        function displayQuickResults(healthData) {
+            const resultsDiv = document.getElementById('results');
+            
+            let html = `
+                <div class="overall-status ${healthData.status === 'ok' ? 'status-pass' : 'status-warn'}">
+                    ${healthData.status === 'ok' ? '✅ SYSTEM HEALTHY' : '⚠️ SYSTEM WARNINGS'}
+                </div>
+                
+                <div class="test-categories">
+                    <div class="test-category">
+                        <div class="category-header">
+                            <i class="fas fa-heartbeat"></i>
+                            Quick Health Check
+                        </div>
+                        <div class="test-item">
+                            <div>
+                                <div class="test-name">Overall Status</div>
+                                <div class="test-message">System health check</div>
+                            </div>
+                            <div class="test-status ${healthData.status === 'ok' ? 'pass' : 'warn'}">
+                                <span class="status-icon">${healthData.status === 'ok' ? '✅' : '⚠️'}</span>
+                                ${healthData.status.toUpperCase()}
+                            </div>
+                        </div>
+                        <div class="test-item">
+                            <div>
+                                <div class="test-name">Database</div>
+                                <div class="test-message">Database connection status</div>
+                            </div>
+                            <div class="test-status ${healthData.database === 'ok' ? 'pass' : 'fail'}">
+                                <span class="status-icon">${healthData.database === 'ok' ? '✅' : '❌'}</span>
+                                ${healthData.database.toUpperCase()}
+                            </div>
+                        </div>
+                        <div class="test-item">
+                            <div>
+                                <div class="test-name">WebSocket Connections</div>
+                                <div class="test-message">Active connections</div>
+                            </div>
+                            <div class="test-status pass">
+                                <span class="status-icon">📊</span>
+                                ${healthData.websocket_clients} clients, ${healthData.websocket_admins} admins
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timestamp">
+                    Last updated: ${new Date(healthData.timestamp).toLocaleString()}
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+        
+        function displaySimpleResult(title, message) {
+            const resultsDiv = document.getElementById('results');
+            
+            const html = `
+                <div class="test-categories">
+                    <div class="test-category">
+                        <div class="category-header">
+                            <i class="fas fa-vial"></i>
+                            ${title}
+                        </div>
+                        <div class="test-item">
+                            <div>
+                                <div class="test-name">Test Result</div>
+                                <div class="test-message">${message}</div>
+                            </div>
+                            <div class="test-status ${message.includes('✅') ? 'pass' : 'fail'}">
+                                <span class="status-icon">${message.includes('✅') ? '✅' : '❌'}</span>
+                                ${message.includes('✅') ? 'PASS' : 'FAIL'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timestamp">
+                    Last updated: ${new Date().toLocaleString()}
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+        
+        function getStatusClass(status) {
+            if (status.includes('✅')) return 'status-pass';
+            if (status.includes('⚠️')) return 'status-warn';
+            if (status.includes('❌')) return 'status-fail';
+            return 'status-warn';
+        }
+        
+        function getTestStatusClass(status) {
+            if (status.includes('✅')) return 'pass';
+            if (status.includes('❌')) return 'fail';
+            if (status.includes('⚠️')) return 'warn';
+            if (status.includes('ℹ️')) return 'info';
+            return 'info';
+        }
+        
+        function getStatusIcon(status) {
+            if (status.includes('✅')) return '✅';
+            if (status.includes('❌')) return '❌';
+            if (status.includes('⚠️')) return '⚠️';
+            if (status.includes('ℹ️')) return 'ℹ️';
+            return '❓';
+        }
+        
+        function formatTestName(name) {
+            return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            const buttons = document.querySelectorAll('.btn');
+            
+            loading.style.display = show ? 'block' : 'none';
+            buttons.forEach(btn => btn.disabled = show);
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function hideError() {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.style.display = 'none';
+        }
+        
+        function clearResults() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.style.display = 'none';
+            hideError();
+        }
+        
+        // Auto-run quick test on page load
+        window.addEventListener('load', () => {
+            setTimeout(runQuickTest, 1000);
+        });
+    </script>
+</body>
+</html>

@@ -7,7 +7,7 @@ from starlette.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware import Middleware
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, delete, text
 import uuid
 import asyncio
 from datetime import datetime
@@ -596,6 +596,250 @@ async def get_statistics(response: Response, admin=Depends(get_current_admin)):
             "websocket_clients": len(manager.clients),
             "websocket_admins": len(manager.admins)
         }
+
+# System Test Dashboard
+@app.get("/test")
+async def test_dashboard():
+    with open("templates/test.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+@app.get("/api/test/comprehensive")
+async def comprehensive_system_test():
+    """Comprehensive system test - all components"""
+    results = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "overall_status": "unknown",
+        "tests": {}
+    }
+    
+    # 1. Database Tests
+    db_tests = {}
+    try:
+        async with session_scope() as s:
+            # Basic connection
+            await s.execute(select(1))
+            db_tests["connection"] = {"status": "✅ PASS", "message": "Database connection successful"}
+            
+            # Table existence
+            tables = ["visitors", "conversations", "messages", "admin_otps", "admin_sessions", "telegram_links", "admin_activity_logs", "conversation_tags"]
+            for table in tables:
+                try:
+                    await s.execute(text(f"SELECT 1 FROM {table} LIMIT 1"))
+                    db_tests[f"table_{table}"] = {"status": "✅ PASS", "message": f"Table {table} exists and accessible"}
+                except Exception as e:
+                    db_tests[f"table_{table}"] = {"status": "❌ FAIL", "message": f"Table {table} error: {str(e)}"}
+            
+            # CRUD operations test
+            try:
+                # Create test visitor
+                test_visitor = Visitor(display_name="Test User", client_ip="127.0.0.1")
+                s.add(test_visitor)
+                await s.flush()
+                
+                # Create test conversation
+                test_conv = Conversation(visitor_id=test_visitor.id)
+                s.add(test_conv)
+                await s.flush()
+                
+                # Create test message
+                test_msg = Message(conversation_id=test_conv.id, sender="visitor", content="Test message")
+                s.add(test_msg)
+                await s.flush()
+                
+                # Read test
+                result = await s.execute(select(Message).where(Message.id == test_msg.id))
+                msg = result.scalar_one()
+                
+                # Update test
+                await s.execute(update(Message).where(Message.id == test_msg.id).values(content="Updated test message"))
+                
+                # Delete test (cascade will handle related records)
+                await s.execute(delete(Conversation).where(Conversation.id == test_conv.id))
+                
+                db_tests["crud_operations"] = {"status": "✅ PASS", "message": "CRUD operations successful"}
+            except Exception as e:
+                db_tests["crud_operations"] = {"status": "❌ FAIL", "message": f"CRUD error: {str(e)}"}
+                
+    except Exception as e:
+        db_tests["connection"] = {"status": "❌ FAIL", "message": f"Database connection failed: {str(e)}"}
+    
+    results["tests"]["database"] = db_tests
+    
+    # 2. Redis/Cache Tests
+    cache_tests = {}
+    try:
+        from app.cache import cache
+        # Test cache operations
+        await cache.set("test_key", "test_value", 60)
+        cached_value = await cache.get("test_key")
+        if cached_value == "test_value":
+            cache_tests["cache_operations"] = {"status": "✅ PASS", "message": "Cache set/get successful"}
+        else:
+            cache_tests["cache_operations"] = {"status": "❌ FAIL", "message": "Cache value mismatch"}
+        await cache.delete("test_key")
+        
+        # Test Redis connection
+        from app.redis_client import redis_client
+        if redis_client.enabled and redis_client.client:
+            try:
+                await redis_client.client.ping()
+                cache_tests["redis_connection"] = {"status": "✅ PASS", "message": "Redis connection active"}
+            except:
+                cache_tests["redis_connection"] = {"status": "⚠️ WARN", "message": "Redis configured but not responding"}
+        else:
+            cache_tests["redis_connection"] = {"status": "ℹ️ INFO", "message": "Redis not configured, using in-memory fallback"}
+    except Exception as e:
+        cache_tests["cache_operations"] = {"status": "❌ FAIL", "message": f"Cache error: {str(e)}"}
+    
+    results["tests"]["cache"] = cache_tests
+    
+    # 3. Telegram Tests
+    telegram_tests = {}
+    try:
+        from app.telegram import tg_send
+        # Test Telegram API (without actually sending)
+        if settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_DEFAULT_CHAT_ID:
+            telegram_tests["config"] = {"status": "✅ PASS", "message": "Telegram configuration present"}
+            # Test API endpoint availability
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/getMe")
+                if r.status_code == 200:
+                    bot_info = r.json()
+                    telegram_tests["bot_api"] = {"status": "✅ PASS", "message": f"Bot API active: {bot_info['result']['username']}"}
+                else:
+                    telegram_tests["bot_api"] = {"status": "❌ FAIL", "message": f"Bot API error: {r.status_code}"}
+        else:
+            telegram_tests["config"] = {"status": "❌ FAIL", "message": "Telegram configuration missing"}
+    except Exception as e:
+        telegram_tests["bot_api"] = {"status": "❌ FAIL", "message": f"Telegram API error: {str(e)}"}
+    
+    results["tests"]["telegram"] = telegram_tests
+    
+    # 4. WebSocket Manager Tests
+    ws_tests = {}
+    try:
+        from app.ws import manager
+        ws_tests["manager_init"] = {"status": "✅ PASS", "message": f"WebSocket manager active - Clients: {len(manager.clients)}, Admins: {len(manager.admins)}"}
+        ws_tests["connection_limits"] = {"status": "✅ PASS", "message": f"Limits: {manager.max_clients} clients, {manager.max_admins} admins"}
+    except Exception as e:
+        ws_tests["manager_init"] = {"status": "❌ FAIL", "message": f"WebSocket manager error: {str(e)}"}
+    
+    results["tests"]["websocket"] = ws_tests
+    
+    # 5. Rate Limiter Tests
+    rate_tests = {}
+    try:
+        from app.rate_limit import ws_rate_limiter
+        # Test rate limiter
+        test_id = "test_client_123"
+        if ws_rate_limiter.allow_ws(test_id, 1, 5):
+            rate_tests["rate_limiter"] = {"status": "✅ PASS", "message": "Rate limiter functioning"}
+        else:
+            rate_tests["rate_limiter"] = {"status": "❌ FAIL", "message": "Rate limiter blocking unexpectedly"}
+    except Exception as e:
+        rate_tests["rate_limiter"] = {"status": "❌ FAIL", "message": f"Rate limiter error: {str(e)}"}
+    
+    results["tests"]["rate_limiting"] = rate_tests
+    
+    # 6. Authentication Tests
+    auth_tests = {}
+    try:
+        from app.auth import create_otp, _hash_code
+        # Test OTP generation
+        code, expires = await create_otp()
+        if len(code) == 6 and code.isdigit():
+            auth_tests["otp_generation"] = {"status": "✅ PASS", "message": "OTP generation successful"}
+        else:
+            auth_tests["otp_generation"] = {"status": "❌ FAIL", "message": "OTP format invalid"}
+        
+        # Test hash function
+        test_hash = _hash_code("123456")
+        if len(test_hash) == 64:  # SHA256 hex length
+            auth_tests["hash_function"] = {"status": "✅ PASS", "message": "Hash function working"}
+        else:
+            auth_tests["hash_function"] = {"status": "❌ FAIL", "message": "Hash function invalid"}
+    except Exception as e:
+        auth_tests["otp_generation"] = {"status": "❌ FAIL", "message": f"Auth error: {str(e)}"}
+    
+    results["tests"]["authentication"] = auth_tests
+    
+    # 7. Environment Tests
+    env_tests = {}
+    required_vars = ["DATABASE_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_DEFAULT_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET", "OTP_HASH_SALT", "ALLOWED_ORIGINS"]
+    for var in required_vars:
+        if hasattr(settings, var) and getattr(settings, var):
+            env_tests[f"env_{var.lower()}"] = {"status": "✅ PASS", "message": f"{var} configured"}
+        else:
+            env_tests[f"env_{var.lower()}"] = {"status": "❌ FAIL", "message": f"{var} missing"}
+    
+    results["tests"]["environment"] = env_tests
+    
+    # 8. System Resources Tests
+    system_tests = {}
+    try:
+        from app.monitoring import SystemMonitor
+        metrics = SystemMonitor.get_system_metrics()
+        if "error" not in metrics:
+            system_tests["system_metrics"] = {"status": "✅ PASS", "message": f"CPU: {metrics['cpu_percent']}%, Memory: {metrics['memory_percent']}%"}
+            system_tests["disk_space"] = {"status": "✅ PASS", "message": f"Disk: {metrics['disk_percent']}% used, {metrics['disk_free_gb']}GB free"}
+        else:
+            system_tests["system_metrics"] = {"status": "❌ FAIL", "message": f"Metrics error: {metrics['error']}"}
+    except Exception as e:
+        system_tests["system_metrics"] = {"status": "❌ FAIL", "message": f"System monitoring error: {str(e)}"}
+    
+    results["tests"]["system"] = system_tests
+    
+    # 9. File System Tests
+    file_tests = {}
+    critical_files = [
+        "app/main.py", "app/models.py", "app/ws.py", "app/auth.py", "app/telegram.py",
+        "static/js/admin.js", "static/js/client.js", "static/js/utils.js",
+        "templates/admin.html", "templates/index.html", "requirements.txt"
+    ]
+    
+    for file_path in critical_files:
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+                if len(content) > 0:
+                    file_tests[f"file_{file_path.replace('/', '_').replace('.', '_')}"] = {"status": "✅ PASS", "message": f"{file_path} exists ({len(content)} chars)"}
+                else:
+                    file_tests[f"file_{file_path.replace('/', '_').replace('.', '_')}"] = {"status": "❌ FAIL", "message": f"{file_path} empty"}
+        except Exception as e:
+            file_tests[f"file_{file_path.replace('/', '_').replace('.', '_')}"] = {"status": "❌ FAIL", "message": f"{file_path} missing or error: {str(e)}"}
+    
+    results["tests"]["filesystem"] = file_tests
+    
+    # Calculate overall status
+    total_tests = 0
+    passed_tests = 0
+    failed_tests = 0
+    
+    for category in results["tests"].values():
+        for test in category.values():
+            total_tests += 1
+            if "✅ PASS" in test["status"]:
+                passed_tests += 1
+            elif "❌ FAIL" in test["status"]:
+                failed_tests += 1
+    
+    if failed_tests == 0:
+        results["overall_status"] = "✅ ALL SYSTEMS OPERATIONAL"
+    elif failed_tests < total_tests * 0.2:  # Less than 20% failed
+        results["overall_status"] = "⚠️ MOSTLY OPERATIONAL"
+    else:
+        results["overall_status"] = "❌ SYSTEM ISSUES DETECTED"
+    
+    results["summary"] = {
+        "total_tests": total_tests,
+        "passed": passed_tests,
+        "failed": failed_tests,
+        "warnings": total_tests - passed_tests - failed_tests,
+        "success_rate": f"{(passed_tests/total_tests*100):.1f}%" if total_tests > 0 else "0%"
+    }
+    
+    return results
 
 # Admin logout
 @app.post("/api/admin/logout")
