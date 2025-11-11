@@ -73,15 +73,15 @@
     messages.scrollTop = messages.scrollHeight;
   }
 
-  function escapeHtml(text) {
+  const escapeHtmlFunc = escapeHtml || function(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-  }
+  };
 
-  function getUserInitial(name) {
+  const getUserInitialFunc = getUserInitial || function(name) {
     return name ? name.charAt(0).toUpperCase() : '?';
-  }
+  };
 
   function addMsg(sender, content, createdAt = null) {
     // Remove empty state if exists
@@ -97,7 +97,7 @@
     avatar.className = 'message-avatar';
     
     if (sender === 'visitor') {
-      avatar.textContent = getUserInitial(userName);
+      avatar.textContent = getUserInitialFunc(userName);
     } else if (sender === 'system') {
       avatar.innerHTML = '<i class="fas fa-info-circle"></i>';
       avatar.style.fontSize = '1rem';
@@ -113,7 +113,7 @@
     
     const text = document.createElement('div');
     text.className = 'message-text';
-    text.textContent = content;
+    text.innerHTML = escapeHtmlFunc(content);
     bubble.appendChild(text);
     
     if (createdAt) {
