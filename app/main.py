@@ -77,7 +77,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.FORCE_HTTPS and settings.APP_ENV == "prod":
             resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         csp_origins = ' '.join(settings.ALLOWED_ORIGINS) if settings.ALLOWED_ORIGINS else ''
-        resp.headers["Content-Security-Policy"] = f"default-src {settings.CSP_DEFAULT_SRC}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' {csp_origins} wss: ws:;"
+        resp.headers["Content-Security-Policy"] = f"default-src {settings.CSP_DEFAULT_SRC}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' {csp_origins} wss://deneme-sohbet.up.railway.app ws://localhost:* wss: ws:;"
         return resp
 
 # Rate limiting middleware for REST API
@@ -208,7 +208,10 @@ async def debug_info():
         "cwd": os.getcwd(),
         "templates_exist": os.path.exists("templates/index.html"),
         "static_exist": os.path.exists("static/js/client.js"),
-        "files": os.listdir(".") if os.path.exists(".") else "not found"
+        "files": os.listdir(".") if os.path.exists(".") else "not found",
+        "allowed_origins": settings.ALLOWED_ORIGINS,
+        "app_env": settings.APP_ENV,
+        "force_https": settings.FORCE_HTTPS
     }
 
 @app.get("/favicon.ico")
