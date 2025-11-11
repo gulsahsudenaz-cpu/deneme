@@ -318,19 +318,23 @@
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/admin?token=${encodeURIComponent(token)}`;
     
+    console.log('Attempting admin WebSocket connection to:', wsUrl);
     ws = new WebSocket(wsUrl);
     ws.onopen = () => {
       setWsState(true);
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log('Admin WebSocket closed:', event.code, event.reason);
       setWsState(false);
       // Reconnect after 3 seconds if authenticated
       if (token) {
         setTimeout(connectWSWithToken, 3000);
       }
     };
-    ws.onerror = () => {
+    ws.onerror = (error) => {
+      console.error('Admin WebSocket error:', error);
       setWsState(false);
+      showNotificationFunc('Admin WebSocket bağlantı hatası', 'error');
     };
     ws.onmessage = (ev) => {
       try {

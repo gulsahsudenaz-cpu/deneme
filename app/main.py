@@ -263,7 +263,11 @@ async def health_detailed():
         logger.warning(f"Health check Redis error: {e}")
     
     # Get system metrics
-    system_health = SystemMonitor.check_system_health()
+    try:
+        system_health = SystemMonitor.check_system_health()
+    except Exception as e:
+        logger.error(f"System health check error: {e}")
+        system_health = {"status": "error", "error": str(e)}
     
     # Determine overall status
     overall_status = "ok"

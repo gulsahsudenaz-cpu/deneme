@@ -154,7 +154,12 @@
   }
 
   async function connect(mode) {
-    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/client`);
+    // Try WebSocket connection with fallback
+    const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsProtocol}://${location.host}/ws/client`;
+    
+    console.log('Attempting WebSocket connection to:', wsUrl);
+    ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
       setConnState(true);
@@ -167,7 +172,8 @@
       }
     };
     
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      console.log('WebSocket closed:', event.code, event.reason);
       setConnState(false);
       // Try to reconnect after 3 seconds if we have a conversation
       if (conversationId) {
@@ -175,8 +181,10 @@
       }
     };
     
-    ws.onerror = () => {
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
       setConnState(false);
+      showNotificationFunc('WebSocket bağlantı hatası', 'error');
     };
     
     ws.onmessage = (ev) => {
