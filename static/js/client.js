@@ -56,18 +56,18 @@
     msgInput.focus();
   }
 
-  function autoResizeTextarea(textarea) {
+  const autoResizeTextareaFunc = autoResizeTextarea || function(textarea) {
     textarea.style.height = 'auto';
     textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-  }
+  };
 
-  function getCurrentTime() {
+  const getCurrentTimeFunc = getCurrentTime || function() {
     const now = new Date();
     return now.toLocaleTimeString('tr-TR', { 
       hour: '2-digit', 
       minute: '2-digit' 
     });
-  }
+  };
 
   function scrollToBottom() {
     messages.scrollTop = messages.scrollHeight;
@@ -119,12 +119,12 @@
     if (createdAt) {
       const time = document.createElement('div');
       time.className = 'message-time';
-      time.textContent = formatTime(createdAt);
+      time.textContent = formatTimeFunc(createdAt);
       bubble.appendChild(time);
     } else {
       const time = document.createElement('div');
       time.className = 'message-time';
-      time.textContent = getCurrentTime();
+      time.textContent = getCurrentTimeFunc();
       bubble.appendChild(time);
     }
     
@@ -133,8 +133,8 @@
     scrollToBottom();
   }
 
-  function formatTime(dateString) {
-    if (!dateString) return getCurrentTime();
+  const formatTimeFunc = formatTime || function(dateString) {
+    if (!dateString) return getCurrentTimeFunc();
     const date = new Date(dateString);
     const now = new Date();
     const diff = now - date;
@@ -276,7 +276,7 @@
     // Optimistically add message
     addMsg('visitor', text);
     msgInput.value = '';
-    autoResizeTextarea(msgInput);
+    autoResizeTextareaFunc(msgInput);
     
     try {
       ws.send(JSON.stringify({type:'message', content:text}));
@@ -287,7 +287,7 @@
   });
 
   msgInput.addEventListener('input', (e) => {
-    autoResizeTextarea(e.target);
+    autoResizeTextareaFunc(e.target);
   });
 
   msgInput.addEventListener('keydown', (e) => {

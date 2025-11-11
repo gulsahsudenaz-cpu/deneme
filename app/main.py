@@ -77,14 +77,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.FORCE_HTTPS and settings.APP_ENV == "prod":
             resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         csp_origins = ' '.join(settings.ALLOWED_ORIGINS) if settings.ALLOWED_ORIGINS else ''
-        resp.headers["Content-Security-Policy"] = f"default-src {settings.CSP_DEFAULT_SRC}; script-src 'self'; style-src 'self'; connect-src 'self' {csp_origins};"
+        resp.headers["Content-Security-Policy"] = f"default-src {settings.CSP_DEFAULT_SRC}; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' {csp_origins} wss: ws:;"
         return resp
 
 # Rate limiting middleware for REST API
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Skip rate limiting for health check, static files, and WebSocket upgrade
-        if request.url.path in ["/health", "/health/detailed", "/", "/admin"] or request.url.path.startswith("/static") or request.url.path.startswith("/ws/"):
+        if request.url.path in ["/health", "/health/detailed", "/", "/admin", "/favicon.ico", "/debug", "/test"] or request.url.path.startswith("/static") or request.url.path.startswith("/ws/"):
             return await call_next(request)
         
         # Get client identifier (use X-Forwarded-For if behind proxy)
@@ -210,6 +210,11 @@ async def debug_info():
         "static_exist": os.path.exists("static/js/client.js"),
         "files": os.listdir(".") if os.path.exists(".") else "not found"
     }
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Simple favicon response"""
+    return Response(content="", media_type="image/x-icon")
 
 @app.get("/health/detailed")
 async def health_detailed():
