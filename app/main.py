@@ -84,7 +84,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Skip rate limiting for health check, static files, and WebSocket upgrade
-        if request.url.path in ["/health", "/", "/admin"] or request.url.path.startswith("/static") or request.url.path.startswith("/ws/"):
+        if request.url.path in ["/health", "/health/detailed", "/", "/admin"] or request.url.path.startswith("/static") or request.url.path.startswith("/ws/"):
             return await call_next(request)
         
         # Get client identifier (use X-Forwarded-For if behind proxy)
@@ -197,7 +197,19 @@ async def periodic_cleanup():
 
 @app.get("/health")
 async def health():
-    """Enhanced health check endpoint with system status"""
+    """Simple health check for Railway deployment"""
+    try:
+        # Quick database check
+        async with session_scope() as s:
+            await s.execute(select(1))
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail="Service unavailable")
+
+@app.get("/health/detailed")
+async def health_detailed():
+    """Detailed health check endpoint with system status"""
     from datetime import datetime
     from app.monitoring import SystemMonitor
     
