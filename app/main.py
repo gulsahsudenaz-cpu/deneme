@@ -83,29 +83,37 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # Rate limiting middleware for REST API
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health check, static files, WebSocket upgrade, and visitor API
-        if request.url.path in ["/health", "/health/detailed", "/", "/admin", "/favicon.ico", "/debug", "/test"] or request.url.path.startswith("/static") or request.url.path.startswith("/ws/") or request.url.path.startswith("/api/visitor/"):
-            return await call_next(request)
-        
-        # Get client identifier (use X-Forwarded-For if behind proxy)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            client_ip = forwarded_for.split(",")[0].strip()
-        else:
-            client_ip = request.client.host if request.client else "unknown"
-        ident = f"api:{client_ip}"
-        
-        # Rate limit: 300 requests per 5 minutes = ~1 req/sec, burst of 20 (increased for HTTP polling)
-        rate_per_sec = 300 / 300  # 1 req/sec
-        if not ws_rate_limiter.allow_api(ident, rate_per_sec, 20):
-            logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
-            return JSONResponse(
-                status_code=429,
-                content={"error": "Too many requests", "detail": "Rate limit exceeded. Please try again later."},
-                headers={"Retry-After": "60"}
-            )
-        
+        # TEMPORARILY DISABLE ALL RATE LIMITING FOR RAILWAY DEBUGGING
         return await call_next(request)
+        
+        # Original rate limiting code (disabled)
+        # # Skip rate limiting for health check, static files, WebSocket upgrade, and visitor API
+        # skip_paths = ["/health", "/health/detailed", "/", "/admin", "/favicon.ico", "/debug", "/test"]
+        # skip_prefixes = ["/static", "/ws/", "/api/visitor/"]
+        # 
+        # if (request.url.path in skip_paths or 
+        #     any(request.url.path.startswith(prefix) for prefix in skip_prefixes)):
+        #     return await call_next(request)
+        # 
+        # # Get client identifier (use X-Forwarded-For if behind proxy)
+        # forwarded_for = request.headers.get("X-Forwarded-For")
+        # if forwarded_for:
+        #     client_ip = forwarded_for.split(",")[0].strip()
+        # else:
+        #     client_ip = request.client.host if request.client else "unknown"
+        # ident = f"api:{client_ip}"
+        # 
+        # # Rate limit: 300 requests per 5 minutes = ~1 req/sec, burst of 20 (increased for HTTP polling)
+        # rate_per_sec = 300 / 300  # 1 req/sec
+        # if not ws_rate_limiter.allow_api(ident, rate_per_sec, 20):
+        #     logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
+        #     return JSONResponse(
+        #         status_code=429,
+        #         content={"error": "Too many requests", "detail": "Rate limit exceeded. Please try again later."},
+        #         headers={"Retry-After": "60"}
+        #     )
+        # 
+        # return await call_next(request)
 
 # Middleware order matters: Request size limit -> Security headers -> Rate limiting
 app.add_middleware(RequestSizeLimitMiddleware)
