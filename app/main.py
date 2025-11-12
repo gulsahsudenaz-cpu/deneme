@@ -298,6 +298,86 @@ async def admin_page():
     with open("templates/admin.html","r",encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
+# Visitor HTTP API (WebSocket fallback)
+@app.post("/api/visitor/join")
+async def visitor_join(request: Request):
+    data = await request.json()
+    display_name = data.get('display_name', 'Ziyaretçi').strip() or 'Ziyaretçi'
+    
+    async with session_scope() as s:
+        v = Visitor(display_name=display_name, client_ip=request.client.host if request.client else None)
+        s.add(v)
+        await s.flush()
+        conv = Conversation(visitor_id=v.id)
+        s.add(conv)
+        await s.flush()
+        conv_id = conv.id
+    
+    # Notify admin via Telegram
+    from app.telegram import notify_new_visitor
+    await notify_new_visitor(conv_id, display_name)
+    
+    return {"conversation_id": str(conv_id), "visitor_name": display_name}
+
+@app.get("/api/visitor/messages/{conversation_id}")
+async def visitor_messages(conversation_id: str):
+    try:
+        conv_id = uuid.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+    
+    async with session_scope() as s:
+        res = await s.execute(
+            select(Message)
+            .where(Message.conversation_id == conv_id)
+            .order_by(Message.created_at.asc())
+            .limit(50)
+        )
+        messages = res.scalars().all()
+        
+        return [{
+            "id": str(m.id),
+            "sender": m.sender,
+            "content": m.content,
+            "created_at": m.created_at.isoformat()
+        } for m in messages]
+
+@app.post("/api/visitor/send")
+async def visitor_send(request: Request):
+    data = await request.json()
+    try:
+        conv_id = uuid.UUID(data['conversation_id'])
+    except (ValueError, KeyError):
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+    
+    content = data.get('content', '').strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Message content required")
+    
+    if len(content) > 2000:
+        raise HTTPException(status_code=400, detail="Message too long")
+    
+    async with session_scope() as s:
+        # Verify conversation exists
+        res = await s.execute(select(Conversation).where(Conversation.id == conv_id, Conversation.status == "open"))
+        conv = res.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Save message
+        s.add(Message(conversation_id=conv_id, sender="visitor", content=content))
+        await s.execute(update(Conversation).where(Conversation.id == conv_id).values(last_activity_at=datetime.utcnow()))
+    
+    # Notify admin via Telegram
+    from app.telegram import notify_visitor_message
+    async with session_scope() as s:
+        res = await s.execute(select(Visitor).join(Conversation).where(Conversation.id == conv_id))
+        visitor = res.scalar_one_or_none()
+        if visitor:
+            await notify_visitor_message(conv_id, visitor.display_name, content)
+    
+    return {"ok": True}
+
 # Admin OTP flow
 @app.post("/api/admin/request_otp", response_model=OTPRequestResponse)
 async def request_otp():

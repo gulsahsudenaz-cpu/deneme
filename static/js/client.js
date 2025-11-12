@@ -154,99 +154,103 @@
   }
 
   async function connect(mode) {
-    // Try WebSocket connection with fallback
-    const wsProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${wsProtocol}://${location.host}/ws/client`;
+    // Railway doesn't support WebSockets - use HTTP polling fallback
+    console.log('WebSocket not supported on Railway, using HTTP polling fallback');
     
-    console.log('Attempting WebSocket connection to:', wsUrl);
-    ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-      setConnState(true);
-      if (mode === 'join') {
-        const name = (displayName.value || 'Ziyaretçi').trim();
-        userName = name;
-        ws.send(JSON.stringify({type:'join', display_name: name}));
-      } else if (mode === 'resume') {
-        ws.send(JSON.stringify({type:'resume', conversation_id: conversationId}));
-      }
-    };
-    
-    ws.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason);
-      setConnState(false);
-      // Try to reconnect after 3 seconds if we have a conversation
-      if (conversationId) {
-        setTimeout(() => connect('resume'), 3000);
-      }
-    };
-    
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setConnState(false);
-      showNotificationFunc('WebSocket bağlantı hatası', 'error');
-    };
-    
-    ws.onmessage = (ev) => {
+    if (mode === 'join') {
+      const name = (displayName.value || 'Ziyaretçi').trim();
+      userName = name;
+      
       try {
-        const d = JSON.parse(ev.data);
-        if (d.type === 'joined') {
-          conversationId = d.conversation_id;
+        const response = await fetch('/api/visitor/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: name })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          conversationId = data.conversation_id;
           localStorage.setItem('conv_id', conversationId);
           showChatLayer();
           showNotificationFunc('Sohbete bağlandı ✅');
-          // Add welcome message
           addMsg('system', 'Destek ekibimiz en kısa sürede size yardımcı olacaktır. Lütfen bekleyin...');
-        } else if (d.type === 'history') {
-          showChatLayer();
-          messages.innerHTML = '';
-          // Store visitor name from history if available
-          if (d.visitor_name) {
-            userName = d.visitor_name;
-          }
-          if (d.messages && d.messages.length > 0) {
-            d.messages.forEach(m => addMsg(m.sender, m.content, m.created_at));
-          } else {
-            // Show empty state if no messages
-            messages.innerHTML = `
-              <div class="empty-state">
-                <i class="fas fa-comments"></i>
-                <h3>Sohbete Hoş Geldiniz</h3>
-                <p>Destek ekibimiz en kısa sürede size yardımcı olacaktır</p>
-              </div>
-            `;
-          }
-          showNotificationFunc('Önceki sohbet yüklendi ✅');
-        } else if (d.type === 'message') {
-          addMsg(d.sender, d.content, d.created_at || new Date().toISOString());
-          // Show notification for new messages from admin
-          if (d.sender !== 'visitor') {
-            showNotificationFunc('Yeni mesajınız var!');
-          }
-        } else if (d.type === 'conversation_deleted') {
-          localStorage.removeItem('conv_id');
-          conversationId = null;
-          messages.innerHTML = '';
-          showWelcomeLayer();
-          showNotificationFunc('Sohbet sonlandırıldı', 'error');
-        } else if (d.type === 'error') {
-          console.error('WebSocket error:', d.error);
-          if (d.error === 'conversation_not_found') {
-            localStorage.removeItem('conv_id');
-            conversationId = null;
-            messages.innerHTML = '';
-            showWelcomeLayer();
-            showNotificationFunc('Sohbet bulunamadı veya kapatıldı.', 'error');
-          } else if (d.error === 'rate_limited') {
-            showNotificationFunc('Çok hızlı mesaj gönderiyorsunuz. Lütfen bekleyin.', 'error');
-          } else {
-            showNotificationFunc('Bir hata oluştu', 'error');
-          }
+          startPolling();
         }
       } catch (e) {
-        console.error('Failed to parse WebSocket message:', e);
+        showNotificationFunc('Bağlantı hatası', 'error');
       }
-    };
+    } else if (mode === 'resume') {
+      showChatLayer();
+      loadMessages();
+      startPolling();
+    }
+  }
+  
+  let pollingInterval;
+  
+  function startPolling() {
+    setConnState(true);
+    pollingInterval = setInterval(loadMessages, 2000); // Poll every 2 seconds
+  }
+  
+  function stopPolling() {
+    setConnState(false);
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      pollingInterval = null;
+    }
+  }
+  
+  async function loadMessages() {
+    if (!conversationId) return;
+    
+    try {
+      const response = await fetch(`/api/visitor/messages/${conversationId}`);
+      if (response.ok) {
+        const messages = await response.json();
+        // Only add new messages
+        const currentMessages = Array.from(document.querySelectorAll('.message')).length;
+        if (messages.length > currentMessages) {
+          // Clear and reload all messages (simple approach)
+          const systemMsg = messages.find(m => m.sender === 'system');
+          if (!systemMsg) {
+            document.querySelector('.empty-state')?.remove();
+          }
+          
+          messages.slice(currentMessages).forEach(m => {
+            addMsg(m.sender, m.content, m.created_at);
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load messages:', e);
+    }
+  }
+  
+  // Replace WebSocket message sending with HTTP
+  async function sendMessage(content) {
+    if (!conversationId) return;
+    
+    try {
+      const response = await fetch('/api/visitor/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: conversationId, content })
+      });
+      
+      if (response.ok) {
+        // Message will appear in next poll
+        return true;
+      }
+    } catch (e) {
+      console.error('Failed to send message:', e);
+      return false;
+    }
+    return false;
+  }
+    
+    // WebSocket functionality replaced with HTTP polling above
   }
 
   // Event listeners
@@ -281,15 +285,13 @@
       return;
     }
     
-    // Optimistically add message
-    addMsg('visitor', text);
-    msgInput.value = '';
-    autoResizeTextareaFunc(msgInput);
-    
-    try {
-      ws.send(JSON.stringify({type:'message', content:text}));
-    } catch (e) {
-      console.error('Failed to send message:', e);
+    // Send message via HTTP
+    const success = await sendMessage(text);
+    if (success) {
+      addMsg('visitor', text);
+      msgInput.value = '';
+      autoResizeTextareaFunc(msgInput);
+    } else {
       showNotificationFunc('Mesaj gönderilemedi', 'error');
     }
   });
@@ -306,6 +308,7 @@
   });
 
   minimizeBtn.addEventListener('click', () => {
+    stopPolling();
     showWelcomeLayer();
   });
 
