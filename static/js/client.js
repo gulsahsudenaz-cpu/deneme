@@ -193,7 +193,7 @@
     console.log('Starting HTTP polling for client (WebSocket not supported on Railway)');
     setConnState(true);
     loadMessages(); // Initial load
-    pollingInterval = setInterval(loadMessages, 2000); // Poll every 2 seconds
+    pollingInterval = setInterval(loadMessages, 4000); // Poll every 4 seconds (reduced frequency)
   }
   
   function stopPolling() {

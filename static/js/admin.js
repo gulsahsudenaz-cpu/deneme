@@ -325,7 +325,7 @@
       if (selectedConv) {
         loadSelectedConversationMessages();
       }
-    }, 3000); // Poll every 3 seconds
+    }, 5000); // Poll every 5 seconds (reduced frequency)
   }
   
   function stopPolling() {
