@@ -313,72 +313,57 @@
     adminMessages.scrollTop = adminMessages.scrollHeight;
   }
 
-  // WebSocket connection
-  function connectWSWithToken() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/admin?token=${encodeURIComponent(token)}`;
+  // HTTP Polling (WebSocket replacement for Railway)
+  let pollingInterval;
+  
+  function startPolling() {
+    console.log('Starting HTTP polling for admin (WebSocket not supported on Railway)');
+    setWsState(true);
+    loadConversations(); // Initial load
+    pollingInterval = setInterval(() => {
+      loadConversations();
+      if (selectedConv) {
+        loadSelectedConversationMessages();
+      }
+    }, 3000); // Poll every 3 seconds
+  }
+  
+  function stopPolling() {
+    setWsState(false);
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      pollingInterval = null;
+    }
+  }
+  
+  async function loadSelectedConversationMessages() {
+    if (!selectedConv) return;
     
-    console.log('Attempting admin WebSocket connection to:', wsUrl);
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      setWsState(true);
-    };
-    ws.onclose = (event) => {
-      console.log('Admin WebSocket closed:', event.code, event.reason);
-      setWsState(false);
-      // Reconnect after 3 seconds if authenticated
-      if (token) {
-        setTimeout(connectWSWithToken, 3000);
-      }
-    };
-    ws.onerror = (error) => {
-      console.error('Admin WebSocket error:', error);
-      setWsState(false);
-      showNotificationFunc('Admin WebSocket bağlantı hatası', 'error');
-    };
-    ws.onmessage = (ev) => {
-      try {
-        const d = JSON.parse(ev.data);
-        if (d.type === 'conversations') {
-          conversations = d.items;
-          renderConversationsList(d.items);
-          // Update stats
-          activeUsers.textContent = `${d.items.length} Aktif`;
-          const totalMsgCount = d.items.reduce((sum, c) => sum + (c.message_count || 0), 0);
-          totalMessages.textContent = `${totalMsgCount} Mesaj`;
-        } else if (d.type === 'conversation_opened') {
-          loadConversations();
-          showNotificationFunc(`Yeni sohbet: ${d.visitor_name}`);
-        } else if (d.type === 'message') {
-          if (selectedConv === d.conversation_id) {
-            addMsg(d.sender, d.content, d.created_at || new Date().toISOString());
-          }
-          // Reload conversations to update last activity
-          loadConversations();
-        } else if (d.type === 'conversation_deleted') {
-          if (selectedConv === d.conversation_id) {
-            selectedConv = null;
-            adminMessages.innerHTML = `
-              <div class="empty-state">
-                <i class="fas fa-comment-dots"></i>
-                <h4>Sohbet silindi</h4>
-                <p>Bu sohbet kalıcı olarak silindi</p>
-              </div>
-            `;
-            convTitle.textContent = 'Sohbet seçiniz';
-            showUsersLayer();
-          }
-          loadConversations();
-        } else if (d.type === 'error') {
-          console.error('WebSocket error:', d.error);
-          if (d.error === 'rate_limited') {
-            showNotificationFunc('Çok hızlı mesaj gönderiyorsunuz. Lütfen bekleyin.', 'error');
-          }
+    try {
+      const result = await api(`/api/admin/messages/${selectedConv}`);
+      const messages = Array.isArray(result) ? result : (result.messages || []);
+      
+      // Only update if message count changed
+      const currentMsgCount = adminMessages.querySelectorAll('.message').length;
+      if (messages.length !== currentMsgCount) {
+        // Clear and reload messages
+        adminMessages.innerHTML = '';
+        if (messages.length === 0) {
+          adminMessages.innerHTML = `
+            <div class="empty-state">
+              <i class="fas fa-comment-dots"></i>
+              <h4>Henüz mesaj yok</h4>
+              <p>İlk mesajı siz gönderin</p>
+            </div>
+          `;
+        } else {
+          messages.forEach(m => addMsg(m.sender, m.content, m.created_at));
+          scrollToBottom();
         }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e);
       }
-    };
+    } catch (e) {
+      console.error('Failed to load conversation messages:', e);
+    }
   }
 
   // Event listeners
@@ -425,7 +410,7 @@
       localStorage.setItem('admin_token', token);
       showUsersLayer();
       showNotificationFunc('Giriş başarılı! 🎉');
-      connectWSWithToken();
+      startPolling(); // Use HTTP polling instead of WebSocket
       await loadConversations();
       // Note: Token rotation is handled in api() function for subsequent requests
     } catch (e) {
@@ -450,27 +435,16 @@
     autoResizeTextareaFunc(adminInput);
     
     try {
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({
-          type: 'admin_message',
+      // Send via HTTP API (WebSocket not available on Railway)
+      await api('/api/admin/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           conversation_id: selectedConv,
           content: text
-        }));
-      } else {
-        await fetch('/api/admin/send', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            conversation_id: selectedConv,
-            content: text
-          })
-        });
-        // Reload to get updated messages
-        await openConversation(selectedConv, convTitle.textContent);
-      }
+        })
+      });
+      // Message will appear in next poll cycle
     } catch (e) {
       console.error('Failed to send message:', e);
       showNotificationFunc('Mesaj gönderilemedi', 'error');
@@ -530,9 +504,7 @@
     
     localStorage.removeItem('admin_token');
     token = null;
-    if (ws) {
-      ws.close();
-    }
+    stopPolling();
     showLoginLayer();
     showNotificationFunc('Çıkış yapıldı 👋');
   });
@@ -544,8 +516,7 @@
   // Initialize
   if (token) {
     showUsersLayer();
-    connectWSWithToken();
-    loadConversations();
+    startPolling(); // Use HTTP polling instead of WebSocket
   } else {
     showLoginLayer();
   }

@@ -190,7 +190,9 @@
   let pollingInterval;
   
   function startPolling() {
+    console.log('Starting HTTP polling for client (WebSocket not supported on Railway)');
     setConnState(true);
+    loadMessages(); // Initial load
     pollingInterval = setInterval(loadMessages, 2000); // Poll every 2 seconds
   }
   
@@ -208,19 +210,28 @@
     try {
       const response = await fetch(`/api/visitor/messages/${conversationId}`);
       if (response.ok) {
-        const messages = await response.json();
-        // Only add new messages
-        const currentMessages = Array.from(document.querySelectorAll('.message')).length;
-        if (messages.length > currentMessages) {
-          // Clear and reload all messages (simple approach)
-          const systemMsg = messages.find(m => m.sender === 'system');
-          if (!systemMsg) {
-            document.querySelector('.empty-state')?.remove();
-          }
+        const newMessages = await response.json();
+        
+        // Check if we need to update messages
+        const currentMsgCount = messages.querySelectorAll('.message').length;
+        if (newMessages.length !== currentMsgCount) {
+          // Clear and reload all messages
+          messages.innerHTML = '';
           
-          messages.slice(currentMessages).forEach(m => {
-            addMsg(m.sender, m.content, m.created_at);
-          });
+          if (newMessages.length === 0) {
+            messages.innerHTML = `
+              <div class="empty-state">
+                <i class="fas fa-comments"></i>
+                <h3>Sohbete Hoş Geldiniz</h3>
+                <p>Destek ekibimiz en kısa sürede size yardımcı olacaktır</p>
+              </div>
+            `;
+          } else {
+            newMessages.forEach(m => {
+              addMsg(m.sender, m.content, m.created_at);
+            });
+            scrollToBottom();
+          }
         }
       }
     } catch (e) {
