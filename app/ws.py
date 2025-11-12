@@ -1,5 +1,6 @@
 import uuid, html, asyncio
-from typing import Dict, Set
+from typing import Dict, Set, Optional, Tuple
+from urllib.parse import urlparse
 from fastapi import WebSocket, WebSocketDisconnect, HTTPException
 from sqlalchemy import select, update, delete
 from datetime import datetime
@@ -8,6 +9,7 @@ from app.models import Visitor, Conversation, Message
 from app.config import settings
 from app.rate_limit import ws_rate_limiter
 from app.logger import logger
+from app.activity_logger import log_admin_activity
 
 def sanitize(text: str) -> str:
     """Sanitize user input by escaping HTML and limiting length.
@@ -19,6 +21,14 @@ def sanitize(text: str) -> str:
         Sanitized text with HTML escaped and length limited
     """
     return html.escape(text or "")[:settings.MAX_MESSAGE_LEN]
+
+def _fire_and_forget(coro, label: str):
+    async def _runner():
+        try:
+            await coro
+        except Exception as exc:
+            logger.error(f"Background task {label} failed: {exc}", exc_info=True)
+    asyncio.create_task(_runner())
 
 class WSManager:
     def __init__(self):
@@ -107,6 +117,31 @@ class WSManager:
 
 manager = WSManager()
 
+def _split_allowed(allowed: str) -> Tuple[str, Optional[str]]:
+    if "://" in allowed:
+        parsed = urlparse(allowed)
+        return (parsed.hostname or "", parsed.scheme)
+    return (allowed, None)
+
+def _origin_allowed(origin: str, allowed: str) -> bool:
+    if not origin:
+        return False
+    if allowed == "*":
+        return True
+    if origin == allowed:
+        return True
+    parsed_origin = urlparse(origin)
+    origin_host = parsed_origin.hostname or ""
+    origin_scheme = parsed_origin.scheme
+    allowed_host, allowed_scheme = _split_allowed(allowed)
+    if allowed_scheme and origin_scheme and allowed_scheme != origin_scheme:
+        return False
+    if allowed_host.startswith("*."):
+        domain = allowed_host[2:]
+        return origin_host.endswith(domain) and origin_host.count(".") > domain.count(".")
+    # Allow comparing host-only entries
+    return origin_host == allowed_host
+
 async def origin_ok(ws: WebSocket) -> bool:
     """Validate WebSocket origin against allowed origins.
     
@@ -116,27 +151,13 @@ async def origin_ok(ws: WebSocket) -> bool:
     Returns:
         True if origin is allowed, False otherwise
     """
-    # TEMPORARY: Allow all origins for Railway debugging
-    # TODO: Re-enable strict origin checking after WebSocket issues are resolved
-    return True
-    
-    # Original strict validation (commented out for debugging)
-    # # In dev mode, allow all origins if ALLOWED_ORIGINS is empty
-    # if not settings.ALLOWED_ORIGINS and settings.APP_ENV == "dev":
-    #     return True
-    # origin = ws.headers.get("origin")
-    # if not origin:
-    #     return False
-    # # Exact match or exact protocol+domain match (prevents subdomain hijacking)
-    # for allowed in settings.ALLOWED_ORIGINS:
-    #     if origin == allowed:
-    #         return True
-    #     # Allow subdomains only if explicitly configured with wildcard
-    #     if allowed.startswith("*."):
-    #         domain = allowed[2:]
-    #         if origin.endswith(domain) and origin.count(".") == domain.count(".") + 1:
-    #             return True
-    # return False
+    origin = ws.headers.get("origin")
+    # Allow all origins in non-prod when nothing configured (local dev)
+    if not settings.ALLOWED_ORIGINS:
+        return settings.APP_ENV != "prod"
+    if not origin:
+        return False
+    return any(_origin_allowed(origin, allowed) for allowed in settings.ALLOWED_ORIGINS)
 
 async def handle_client(ws: WebSocket):
     logger.info(f"Client WebSocket connection attempt from {ws.client.host if ws.client else 'unknown'}")
@@ -181,7 +202,7 @@ async def handle_client(ws: WebSocket):
         await manager.send(ws, {"type":"joined","conversation_id":str(conv_id),"visitor_name":display_name})
         # notify admins + telegram
         await manager.broadcast_admin({"type":"conversation_opened","conversation_id":str(conv_id),"visitor_name":display_name})
-        await notify_new_visitor(conv_id, display_name)
+        _fire_and_forget(notify_new_visitor(conv_id, display_name), "notify_new_visitor_ws")
 
     elif init.get("type") == "resume":
         try:
@@ -217,7 +238,7 @@ async def handle_client(ws: WebSocket):
             if rows:
                 visitor_name = rows[0][1].display_name
         await manager.send(ws, {"type":"history","conversation_id":str(conv_id),"visitor_name":visitor_name,
-                                "messages":[{"id":str(m.id),"sender":m.sender,"content":m.content,"created_at":m.created_at.isoformat()} for m in history]})
+                                "messages":[{"id":str(m.id),"sender":m.sender,"message_type":m.message_type,"content":m.content,"file_url":f"/files/{m.file_path.replace('\\', '/')}" if m.file_path else None,"file_size":m.file_size,"file_mime":m.file_mime,"created_at":m.created_at.isoformat()} for m in history]})
     else:
         await ws.close(code=1008)
         return
@@ -275,10 +296,10 @@ async def handle_client(ws: WebSocket):
                 await s.execute(update(Conversation).where(Conversation.id==conv_id).values(last_activity_at=datetime.utcnow()))
             # deliver
             await manager.broadcast_to_conversation(conv_id, {
-                "type":"message","conversation_id":str(conv_id),"sender":"visitor","content":content
+                "type":"message","conversation_id":str(conv_id),"sender":"visitor","message_type":"text","content":content
             })
             # telegram notify
-            await notify_visitor_message(conv_id, display_name, content)
+            _fire_and_forget(notify_visitor_message(conv_id, display_name, content), "notify_visitor_message_ws")
 
         elif msg.get("type") == "typing":
             # Broadcast typing indicator to admin
@@ -292,7 +313,7 @@ async def handle_client(ws: WebSocket):
             # ignore from client
             pass
 
-async def handle_admin(ws: WebSocket, token: str):
+async def handle_admin(ws: WebSocket, token: str, session_id: Optional[str] = None):
     logger.info(f"Admin WebSocket connection from {ws.client.host if ws.client else 'unknown'} with token: {token[:10]}...")
     logger.info(f"Headers: {dict(ws.headers)}")
     
@@ -371,7 +392,9 @@ async def handle_admin(ws: WebSocket, token: str):
                         continue
                     s.add(Message(conversation_id=conv_id, sender="admin", content=content))
                     await s.execute(update(Conversation).where(Conversation.id==conv_id).values(last_activity_at=datetime.utcnow()))
-                await manager.broadcast_to_conversation(conv_id, {"type":"message","conversation_id":str(conv_id),"sender":"admin","content":content})
+                await manager.broadcast_to_conversation(conv_id, {"type":"message","conversation_id":str(conv_id),"sender":"admin","message_type":"text","content":content})
+                if session_id:
+                    await log_admin_activity(session_id, "send_message", str(conv_id), {"content_length": len(content)})
             elif data.get("type") == "typing":
                 # Broadcast typing indicator to visitor
                 try:
@@ -402,6 +425,7 @@ async def handle_admin(ws: WebSocket, token: str):
                 await manager.broadcast_to_conversation(conv_id, {"type":"conversation_deleted","conversation_id":str(conv_id)})
                 # cleanup ws client map if any (after broadcast)
                 await manager.unregister_client(conv_id)
+                if session_id:
+                    await log_admin_activity(session_id, "delete_conversation", str(conv_id), None)
     except WebSocketDisconnect:
         await manager.unregister_admin(ws)
-

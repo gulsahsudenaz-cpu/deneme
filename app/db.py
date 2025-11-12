@@ -8,14 +8,22 @@ from app.logger import logger
 class Base(DeclarativeBase):
     pass
 
+engine_kwargs = {
+    "future": True,
+    "pool_pre_ping": True,
+    "echo": False  # Set to True for SQL query logging in dev
+}
+
+if settings.DATABASE_URL.startswith(("postgresql://", "postgresql+asyncpg://")):
+    engine_kwargs.update(
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_timeout=settings.DB_POOL_TIMEOUT
+    )
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    future=True,
-    pool_pre_ping=True,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_timeout=settings.DB_POOL_TIMEOUT,
-    echo=False  # Set to True for SQL query logging in dev
+    **engine_kwargs
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -84,4 +92,3 @@ async def run_migrations():
                     logger.error(f"Migration {migration_file.name} failed: {e}")
                     # Don't raise - allow app to start even if migration fails
                     # raise  # Uncomment to fail on migration error
-

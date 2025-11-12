@@ -1,29 +1,56 @@
 """Telegram integration tests"""
+import uuid
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
+from contextlib import asynccontextmanager
 from app.telegram import tg_send, notify_new_visitor
 
-@pytest.mark.asyncio
-async def test_tg_send():
+@pytest.mark.anyio("asyncio")
+async def test_tg_send_success():
     """Test Telegram message sending"""
-    with patch('httpx.AsyncClient.post') as mock_post:
-        mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = {"ok": True}
+    mock_response = Mock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"ok": True, "result": {"message_id": 42}}
+    
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_response)
+    
+    async def fake_client(*args, **kwargs):
+        return mock_client
+    
+    with patch("app.telegram.httpx.AsyncClient") as mock_cls:
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__.return_value = mock_client
+        mock_ctx.__aexit__.return_value = False
+        mock_cls.return_value = mock_ctx
         
         result = await tg_send("123456789", "Test message")
-        assert result is True
-        mock_post.assert_called_once()
+        assert result == 42
+        mock_client.post.assert_called_once()
 
-@pytest.mark.asyncio
-async def test_notify_new_visitor():
+@pytest.mark.anyio("asyncio")
+async def test_notify_new_visitor(monkeypatch):
     """Test new visitor notification"""
-    with patch('app.telegram.tg_send') as mock_send:
-        mock_send.return_value = True
-        
-        await notify_new_visitor("test-conv-id", "Test User")
-        mock_send.assert_called_once()
+    called = {}
+    async def fake_tg_send(chat_id, text, reply_to_message_id=None):
+        called["chat_id"] = chat_id
+        called["text"] = text
+        return 100
+    
+    @asynccontextmanager
+    async def fake_session_scope():
+        class DummySession:
+            def add(self, obj):
+                self.added = obj
+        yield DummySession()
+    
+    monkeypatch.setattr("app.telegram.tg_send", fake_tg_send)
+    monkeypatch.setattr("app.telegram.session_scope", fake_session_scope)
+    
+    await notify_new_visitor(uuid.uuid4(), "Test User")
+    assert "chat_id" in called
 
-@pytest.mark.asyncio
+@pytest.mark.anyio("asyncio")
 async def test_telegram_webhook_validation():
     """Test Telegram webhook secret validation"""
     from fastapi.testclient import TestClient

@@ -95,8 +95,8 @@ def get_settings() -> Settings:
         raise ValueError("OTP_HASH_SALT must be changed from default value")
     
     # Validate DATABASE_URL format
-    if not s.DATABASE_URL.startswith(('postgresql://', 'postgresql+asyncpg://')):
-        raise ValueError('DATABASE_URL must start with postgresql:// or postgresql+asyncpg://')
+    if not s.DATABASE_URL.startswith(('postgresql://', 'postgresql+asyncpg://', 'sqlite+aiosqlite://')):
+        raise ValueError('DATABASE_URL must start with postgresql://, postgresql+asyncpg://, or sqlite+aiosqlite://')
     
     # Validate REDIS_URL format (if set)
     if s.REDIS_URL and not s.REDIS_URL.startswith(('redis://', 'rediss://')):
@@ -134,4 +134,3 @@ def get_settings() -> Settings:
     return s
 
 settings = get_settings()
-

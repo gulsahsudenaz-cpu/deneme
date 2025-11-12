@@ -86,6 +86,9 @@
 
       <form id="msgForm" class="message-form">
         <div class="input-container">
+          <button type="button" id="fileBtn" class="file-btn" title="Dosya Gönder">
+            <i class="fas fa-paperclip"></i>
+          </button>
           <textarea 
             id="msgInput" 
             placeholder="Mesajınızı yazın..." 
@@ -96,6 +99,7 @@
             <i class="fas fa-paper-plane"></i>
           </button>
         </div>
+        <input type="file" id="fileInput" accept="image/*,audio/*" style="display: none;">
       </form>
     </main>
   </div>

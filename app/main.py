@@ -1,8 +1,8 @@
-from fastapi import FastAPI, Request, Depends, WebSocket, WebSocketDisconnect, Header, HTTPException, Query, status as http_status
+from fastapi import FastAPI, Request, Depends, WebSocket, WebSocketDisconnect, Header, HTTPException, Query, status as http_status, UploadFile, File, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from starlette.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -10,7 +10,9 @@ from starlette.middleware import Middleware
 from sqlalchemy import select, func, update, delete, text
 import uuid
 import asyncio
+import os
 from datetime import datetime
+from pathlib import Path
 
 from app.config import settings
 from app.db import init_db, session_scope
@@ -18,7 +20,7 @@ from app.models import Conversation, Visitor, Message
 from app.schemas import VisitorCreate, AdminLoginRequest, AdminLoginResponse, OTPRequestResponse, SendAdminMessage
 from app.auth import create_otp, verify_otp_and_issue_session, get_current_admin, logout_admin, cleanup_expired_sessions_and_otps
 from app.activity_logger import log_admin_activity
-from app.ws import manager, handle_client, handle_admin
+from app.ws import manager, handle_client, handle_admin, sanitize
 from app.telegram import router as telegram_router
 from app.rate_limit import ws_rate_limiter
 from app.logger import logger
@@ -129,7 +131,11 @@ app.add_middleware(
     expose_headers=["X-New-Token", "X-Token-Rotated"],  # Expose custom headers for token rotation
 )
 
+UPLOADS_DIR = Path("uploads")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/files", StaticFiles(directory=str(UPLOADS_DIR)), name="files")
 
 @app.on_event("startup")
 async def startup():
@@ -211,6 +217,7 @@ async def health():
 @app.get("/debug")
 async def debug_info():
     """Debug endpoint to check file paths"""
+    _ensure_debug_allowed()
     import os
     return {
         "cwd": os.getcwd(),
@@ -230,6 +237,7 @@ async def favicon():
 @app.get("/ws-test")
 async def websocket_test():
     """Test WebSocket endpoint availability"""
+    _ensure_debug_allowed()
     return {
         "websocket_endpoints": ["/ws/client", "/ws/admin"],
         "server_host": "0.0.0.0:8080",
@@ -310,10 +318,14 @@ async def admin_page():
 @app.post("/api/visitor/join")
 async def visitor_join(request: Request):
     data = await request.json()
-    display_name = data.get('display_name', 'Ziyaretçi').strip() or 'Ziyaretçi'
+    client_ip = _get_client_ip(request)
+    ident = f"visitor_join:{client_ip}"
+    if not ws_rate_limiter.allow_api(ident, 0.2, 3):  # ~12 req/min with burst
+        raise HTTPException(status_code=429, detail="Too many join attempts")
+    display_name = sanitize(data.get('display_name', 'Ziyaretçi')).strip() or 'Ziyaretçi'
     
     async with session_scope() as s:
-        v = Visitor(display_name=display_name, client_ip=request.client.host if request.client else None)
+        v = Visitor(display_name=display_name, client_ip=client_ip)
         s.add(v)
         await s.flush()
         conv = Conversation(visitor_id=v.id)
@@ -323,7 +335,12 @@ async def visitor_join(request: Request):
     
     # Notify admin via Telegram
     from app.telegram import notify_new_visitor
-    await notify_new_visitor(conv_id, display_name)
+    _schedule_background_task(notify_new_visitor(conv_id, display_name), "notify_new_visitor")
+    await manager.broadcast_admin({"type": "conversation_opened", "conversation_id": str(conv_id), "visitor_name": display_name})
+    
+    # Invalidate cached conversation snapshots
+    from app.cache import cache
+    await cache.delete_by_pattern("conversations:*")
     
     return {"conversation_id": str(conv_id), "visitor_name": display_name}
 
@@ -346,7 +363,11 @@ async def visitor_messages(conversation_id: str):
         return [{
             "id": str(m.id),
             "sender": m.sender,
+            "message_type": m.message_type,
             "content": m.content,
+            "file_url": f"/files/{m.file_path.replace(os.sep, '/')}" if m.file_path else None,
+            "file_size": m.file_size,
+            "file_mime": m.file_mime,
             "created_at": m.created_at.isoformat()
         } for m in messages]
 
@@ -358,12 +379,48 @@ async def visitor_send(request: Request):
     except (ValueError, KeyError):
         raise HTTPException(status_code=400, detail="Invalid conversation ID")
     
-    content = data.get('content', '').strip()
+    client_ip = _get_client_ip(request)
+    ident = f"visitor_send:{client_ip}:{conv_id}"
+    rate = max(settings.WS_USER_MSGS_PER_SEC, 1)
+    if not ws_rate_limiter.allow_api(ident, rate, settings.WS_USER_BURST):
+        raise HTTPException(status_code=429, detail="Too many messages")
+    
+    content = sanitize(data.get('content', ''))
     if not content:
         raise HTTPException(status_code=400, detail="Message content required")
     
-    if len(content) > 2000:
-        raise HTTPException(status_code=400, detail="Message too long")
+    visitor_name = "Ziyaretçi"
+    async with session_scope() as s:
+        res = await s.execute(
+            select(Conversation, Visitor)
+            .join(Visitor, Conversation.visitor_id == Visitor.id)
+            .where(Conversation.id == conv_id, Conversation.status == "open")
+        )
+        row = res.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conv, visitor = row
+        visitor_name = visitor.display_name
+        s.add(Message(conversation_id=conv_id, sender="visitor", message_type="text", content=content))
+        await s.execute(update(Conversation).where(Conversation.id == conv_id).values(last_activity_at=datetime.utcnow()))
+    
+    await manager.broadcast_to_conversation(conv_id, {"type": "message", "conversation_id": str(conv_id), "sender": "visitor", "message_type": "text", "content": content})
+    
+    from app.telegram import notify_visitor_message
+    _schedule_background_task(notify_visitor_message(conv_id, visitor_name, content), "notify_visitor_message")
+    
+    from app.cache import cache
+    await cache.delete_by_pattern("conversations:*")
+    await cache.delete_by_pattern(f"messages:{str(conv_id)}:*")
+    
+    return {"ok": True}
+
+@app.post("/api/visitor/upload")
+async def visitor_upload(conversation_id: str = Form(), file: UploadFile = File()):
+    try:
+        conv_id = uuid.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
     
     async with session_scope() as s:
         # Verify conversation exists
@@ -371,20 +428,61 @@ async def visitor_send(request: Request):
         conv = res.scalar_one_or_none()
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
+    # Save file
+    from app.file_handler import save_file, get_file_url
+    try:
+        file_path, file_size, file_type = await save_file(file, str(conv_id))
         
-        # Save message
-        s.add(Message(conversation_id=conv_id, sender="visitor", content=content))
-        await s.execute(update(Conversation).where(Conversation.id == conv_id).values(last_activity_at=datetime.utcnow()))
-    
-    # Notify admin via Telegram
-    from app.telegram import notify_visitor_message
-    async with session_scope() as s:
-        res = await s.execute(select(Visitor).join(Conversation).where(Conversation.id == conv_id))
-        visitor = res.scalar_one_or_none()
-        if visitor:
-            await notify_visitor_message(conv_id, visitor.display_name, content)
-    
-    return {"ok": True}
+        # Save message to database
+        async with session_scope() as s:
+            content = f"Shared a {file_type}: {file.filename}" if file.filename else f"Shared a {file_type}"
+            s.add(Message(
+                conversation_id=conv_id,
+                sender="visitor",
+                message_type=file_type,
+                content=content,
+                file_path=file_path,
+                file_size=file_size,
+                file_mime=file.content_type
+            ))
+            await s.execute(update(Conversation).where(Conversation.id == conv_id).values(last_activity_at=datetime.utcnow()))
+        
+        file_url = get_file_url(file_path)
+        await manager.broadcast_to_conversation(conv_id, {
+            "type": "message",
+            "conversation_id": str(conv_id),
+            "sender": "visitor",
+            "message_type": file_type,
+            "content": content,
+            "file_url": file_url,
+            "file_size": file_size
+        })
+        
+        # Notify admin via Telegram
+        from app.telegram import notify_visitor_message
+        async with session_scope() as s:
+            res = await s.execute(select(Visitor).join(Conversation).where(Conversation.id == conv_id))
+            visitor = res.scalar_one_or_none()
+            if visitor:
+                _schedule_background_task(
+                    notify_visitor_message(conv_id, visitor.display_name, f"📎 {content}"),
+                    "notify_visitor_message_file"
+                )
+        
+        from app.cache import cache
+        await cache.delete_by_pattern("conversations:*")
+        await cache.delete_by_pattern(f"messages:{str(conv_id)}:*")
+        
+        return {
+            "ok": True,
+            "file_url": file_url,
+            "file_type": file_type,
+            "file_size": file_size
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
 # Admin OTP flow
 @app.post("/api/admin/request_otp", response_model=OTPRequestResponse)
@@ -466,17 +564,90 @@ async def admin_send(msg: SendAdminMessage, response: Response, admin=Depends(ge
         conv = res.scalar_one_or_none()
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found or closed")
-        s.add(Message(conversation_id=msg.conversation_id, sender="admin", content=content))
+        s.add(Message(conversation_id=msg.conversation_id, sender="admin", message_type="text", content=content))
         await s.execute(update(Conversation).where(Conversation.id==msg.conversation_id).values(last_activity_at=datetime.utcnow()))
-    await manager.broadcast_to_conversation(msg.conversation_id, {"type":"message","conversation_id":str(msg.conversation_id),"sender":"admin","content":content})
+    await manager.broadcast_to_conversation(msg.conversation_id, {"type":"message","conversation_id":str(msg.conversation_id),"sender":"admin","message_type":"text","content":content})
     # Invalidate cache for conversation list
     from app.cache import cache
     deleted_count = await cache.delete_by_pattern("conversations:*")
     if deleted_count > 0:
         logger.debug(f"Invalidated {deleted_count} conversation list cache entries after admin message")
+    await cache.delete_by_pattern(f"messages:{str(msg.conversation_id)}:*")
     # Log admin activity
     await log_admin_activity(admin["session_id"], "send_message", str(msg.conversation_id), {"content_length": len(content)})
     return {"ok": True}
+
+@app.post("/api/admin/upload")
+async def admin_upload(conversation_id: str = Form(), file: UploadFile = File(), response: Response = None, admin=Depends(get_current_admin)):
+    # Check if token was rotated and set response header
+    if admin.get("rotated") and admin.get("token"):
+        response.headers["X-New-Token"] = admin["token"]
+        response.headers["X-Token-Rotated"] = "true"
+    
+    try:
+        conv_id = uuid.UUID(conversation_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
+    
+    async with session_scope() as s:
+        # Verify conversation exists
+        res = await s.execute(select(Conversation).where(Conversation.id == conv_id, Conversation.status == "open"))
+        conv = res.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Save file
+    from app.file_handler import save_file, get_file_url
+    from app.ws import manager
+    try:
+        file_path, file_size, file_type = await save_file(file, str(conv_id))
+        
+        # Save message to database
+        async with session_scope() as s:
+            content = f"Shared a {file_type}: {file.filename}" if file.filename else f"Shared a {file_type}"
+            s.add(Message(
+                conversation_id=conv_id,
+                sender="admin",
+                message_type=file_type,
+                content=content,
+                file_path=file_path,
+                file_size=file_size,
+                file_mime=file.content_type
+            ))
+            await s.execute(update(Conversation).where(Conversation.id == conv_id).values(last_activity_at=datetime.utcnow()))
+        
+        # Broadcast to conversation
+        file_url = get_file_url(file_path)
+        await manager.broadcast_to_conversation(conv_id, {
+            "type": "message",
+            "conversation_id": str(conv_id),
+            "sender": "admin",
+            "message_type": file_type,
+            "content": content,
+            "file_url": file_url,
+            "file_size": file_size,
+            "file_mime": file.content_type
+        })
+        
+        # Invalidate cache
+        from app.cache import cache
+        deleted_count = await cache.delete_by_pattern("conversations:*")
+        if deleted_count > 0:
+            logger.debug(f"Invalidated {deleted_count} conversation list cache entries after admin file")
+        
+        # Log admin activity
+        await log_admin_activity(admin["session_id"], "send_file", str(conv_id), {"file_type": file_type, "file_size": file_size})
+        
+        return {
+            "ok": True,
+            "file_url": file_url,
+            "file_type": file_type,
+            "file_size": file_size
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
 # List conversations (admin) with pagination and caching
 @app.get("/api/admin/conversations")
@@ -593,7 +764,16 @@ async def list_messages(conversation_id: str, response: Response, admin=Depends(
             next_cursor = f"{last_msg.created_at.isoformat()}:{last_msg.id}"
         
         # Return array format for backward compatibility, but also support cursor
-        messages = [{"id":str(m.id),"sender":m.sender,"content":m.content,"created_at":m.created_at.isoformat()} for m in ms]
+        messages = [{
+            "id": str(m.id),
+            "sender": m.sender,
+            "message_type": m.message_type,
+            "content": m.content,
+            "file_url": f"/files/{m.file_path.replace(os.sep, '/')}" if m.file_path else None,
+            "file_size": m.file_size,
+            "file_mime": m.file_mime,
+            "created_at": m.created_at.isoformat()
+        } for m in ms]
         
         # If cursor is provided, return new format with pagination info
         if cursor:
@@ -642,6 +822,7 @@ async def delete_conversation(conversation_id: str, response: Response, admin=De
     deleted_count = await cache.delete_by_pattern("conversations:*")
     if deleted_count > 0:
         logger.info(f"Invalidated {deleted_count} conversation list cache entries")
+    await cache.delete_by_pattern(f"messages:{str(conv_id)}:*")
     logger.info(f"Conversation {conv_id} deleted by admin")
     # Log admin activity
     await log_admin_activity(admin["session_id"], "delete_conversation", str(conv_id), None)
@@ -680,7 +861,11 @@ async def search_messages(q: str, response: Response, admin=Depends(get_current_
             "conversation_id": str(conv.id),
             "visitor_name": visitor.display_name,
             "sender": msg.sender,
+            "message_type": msg.message_type,
             "content": msg.content,
+            "file_url": f"/files/{msg.file_path.replace(os.sep, '/')}" if msg.file_path else None,
+            "file_size": msg.file_size,
+            "file_mime": msg.file_mime,
             "created_at": msg.created_at.isoformat()
         } for msg, conv, visitor in results]
 
@@ -732,12 +917,14 @@ async def get_statistics(response: Response, admin=Depends(get_current_admin)):
 # System Test Dashboard
 @app.get("/test")
 async def test_dashboard():
+    _ensure_debug_allowed()
     with open("templates/test.html", "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 @app.get("/api/test/comprehensive")
 async def comprehensive_system_test():
     """Comprehensive system test - all components"""
+    _ensure_debug_allowed()
     results = {
         "timestamp": datetime.utcnow().isoformat(),
         "overall_status": "unknown",
@@ -1047,12 +1234,13 @@ async def ws_admin(ws: WebSocket, authorization: str | None = Header(default=Non
             ses = res.scalar_one_or_none()
             if not ses:
                 raise HTTPException(status_code=401, detail="Invalid token")
+        session_id = str(ses.id)
     except HTTPException:
         await ws.close(code=1008, reason="Invalid token")
         return
     # Token is valid, now handle the connection
     try:
-        await handle_admin(ws, auth_token)
+        await handle_admin(ws, auth_token, session_id)
     except WebSocketDisconnect:
         # Normal disconnect, no need to log
         pass
@@ -1065,4 +1253,20 @@ async def ws_admin(ws: WebSocket, authorization: str | None = Header(default=Non
             pass
         except Exception as close_error:
             logger.error(f"Error closing WebSocket after error: {close_error}")
+def _get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
+def _schedule_background_task(coro, label: str):
+    async def _runner():
+        try:
+            await coro
+        except Exception as exc:
+            logger.error(f"Background task {label} failed: {exc}", exc_info=True)
+    asyncio.create_task(_runner())
+
+def _ensure_debug_allowed():
+    if settings.APP_ENV == "prod":
+        raise HTTPException(status_code=404, detail="Not found")

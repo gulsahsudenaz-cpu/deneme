@@ -1,6 +1,8 @@
--- Migration: Add all new features
 -- Version: 2.0.0
 -- Date: 2024
+
+-- Ensure pgcrypto is available for gen_random_uuid
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Add read_at and edited_at to messages
 ALTER TABLE messages 

@@ -11,7 +11,7 @@ class SystemMonitor:
     def get_system_metrics() -> Dict[str, Any]:
         """Get current system metrics"""
         try:
-            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_percent = psutil.cpu_percent(interval=None)
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             

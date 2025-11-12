@@ -143,6 +143,9 @@
 
       <form id="adminForm" class="message-form">
         <div class="input-container">
+          <button type="button" id="adminFileBtn" class="file-btn" title="Dosya Gönder">
+            <i class="fas fa-paperclip"></i>
+          </button>
           <textarea 
             id="adminInput" 
             placeholder="Yanıt yaz..." 
@@ -153,6 +156,7 @@
             <i class="fas fa-paper-plane"></i>
           </button>
         </div>
+        <input type="file" id="adminFileInput" accept="image/*,audio/*" style="display: none;">
       </form>
     </main>
   </div>

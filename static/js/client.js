@@ -83,7 +83,7 @@
     return name ? name.charAt(0).toUpperCase() : '?';
   };
 
-  function addMsg(sender, content, createdAt = null) {
+  function addMsg(sender, content, createdAt = null, messageType = 'text', fileUrl = null, fileSize = null, fileMime = null) {
     // Remove empty state if exists
     const emptyState = messages.querySelector('.empty-state');
     if (emptyState) {
@@ -111,10 +111,43 @@
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
     
-    const text = document.createElement('div');
-    text.className = 'message-text';
-    text.innerHTML = escapeHtmlFunc(content);
-    bubble.appendChild(text);
+    // Handle different message types
+    if (messageType === 'image' && fileUrl) {
+      const img = document.createElement('img');
+      img.src = fileUrl;
+      img.className = 'message-image';
+      img.style.maxWidth = '200px';
+      img.style.maxHeight = '200px';
+      img.style.borderRadius = '8px';
+      img.style.cursor = 'pointer';
+      img.onclick = () => window.open(fileUrl, '_blank');
+      bubble.appendChild(img);
+      
+      if (content && content !== `Shared a image`) {
+        const text = document.createElement('div');
+        text.className = 'message-text';
+        text.innerHTML = escapeHtmlFunc(content);
+        bubble.appendChild(text);
+      }
+    } else if (messageType === 'audio' && fileUrl) {
+      const audio = document.createElement('audio');
+      audio.src = fileUrl;
+      audio.controls = true;
+      audio.style.maxWidth = '250px';
+      bubble.appendChild(audio);
+      
+      if (content && content !== `Shared a audio`) {
+        const text = document.createElement('div');
+        text.className = 'message-text';
+        text.innerHTML = escapeHtmlFunc(content);
+        bubble.appendChild(text);
+      }
+    } else {
+      const text = document.createElement('div');
+      text.className = 'message-text';
+      text.innerHTML = escapeHtmlFunc(content);
+      bubble.appendChild(text);
+    }
     
     if (createdAt) {
       const time = document.createElement('div');
@@ -228,7 +261,7 @@
             `;
           } else {
             newMessages.forEach(m => {
-              addMsg(m.sender, m.content, m.created_at);
+              addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime);
             });
             scrollToBottom();
           }
@@ -259,6 +292,95 @@
       return false;
     }
     return false;
+  }
+  
+  // File upload function
+  async function uploadFile(file) {
+    if (!conversationId) return false;
+    
+    const formData = new FormData();
+    formData.append('conversation_id', conversationId);
+    formData.append('file', file);
+    
+    try {
+      const response = await fetch('/api/visitor/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        return result;
+      } else {
+        const error = await response.json();
+        throw new Error(error.detail || 'Upload failed');
+      }
+    } catch (e) {
+      console.error('Failed to upload file:', e);
+      throw e;
+    }
+  }
+  
+  // Handle file selection
+  function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Validate file type
+    const allowedTypes = {
+      'image/jpeg': 'image',
+      'image/png': 'image', 
+      'image/gif': 'image',
+      'image/webp': 'image',
+      'audio/mpeg': 'audio',
+      'audio/wav': 'audio',
+      'audio/ogg': 'audio',
+      'audio/webm': 'audio',
+      'audio/mp4': 'audio'
+    };
+    
+    if (!allowedTypes[file.type]) {
+      showNotificationFunc('Desteklenmeyen dosya türü. Sadece resim ve ses dosyaları kabul edilir.', 'error');
+      return;
+    }
+    
+    const fileType = allowedTypes[file.type];
+    const maxSize = fileType === 'image' ? 5 * 1024 * 1024 : 10 * 1024 * 1024; // 5MB for images, 10MB for audio
+    
+    if (file.size > maxSize) {
+      showNotificationFunc(`Dosya çok büyük. Maksimum boyut: ${maxSize / 1024 / 1024}MB`, 'error');
+      return;
+    }
+    
+    // Show uploading message
+    const uploadingMsg = `📤 ${fileType === 'image' ? 'Resim' : 'Ses dosyası'} yükleniyor...`;
+    addMsg('visitor', uploadingMsg, null, 'text');
+    
+    // Upload file
+    uploadFile(file)
+      .then(result => {
+        // Remove uploading message
+        const lastMsg = messages.lastElementChild;
+        if (lastMsg && lastMsg.textContent.includes('yükleniyor')) {
+          lastMsg.remove();
+        }
+        
+        // File will appear in next poll, but show immediate feedback
+        const fileName = file.name || `${fileType} dosyası`;
+        addMsg('visitor', `📎 ${fileName}`, null, fileType, result.file_url, result.file_size, file.type);
+      })
+      .catch(error => {
+        // Remove uploading message
+        const lastMsg = messages.lastElementChild;
+        if (lastMsg && lastMsg.textContent.includes('yükleniyor')) {
+          lastMsg.remove();
+        }
+        
+        showNotificationFunc(`Dosya yüklenemedi: ${error.message}`, 'error');
+      });
+    
+    // Clear file input
+    event.target.value = '';
   }
 
   // Event listeners
@@ -292,7 +414,7 @@
     // Send message via HTTP
     const success = await sendMessage(text);
     if (success) {
-      addMsg('visitor', text);
+      addMsg('visitor', text, null, 'text');
       msgInput.value = '';
       autoResizeTextareaFunc(msgInput);
     } else {
@@ -310,6 +432,20 @@
       msgForm.dispatchEvent(new Event('submit'));
     }
   });
+  
+  // File input handler
+  const fileInput = document.getElementById('fileInput');
+  if (fileInput) {
+    fileInput.addEventListener('change', handleFileSelect);
+  }
+  
+  // File upload button handler
+  const fileBtn = document.getElementById('fileBtn');
+  if (fileBtn && fileInput) {
+    fileBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+  }
 
   minimizeBtn.addEventListener('click', () => {
     stopPolling();

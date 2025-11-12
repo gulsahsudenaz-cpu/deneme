@@ -264,7 +264,7 @@
         return;
       }
 
-      messages.forEach(m => addMsg(m.sender, m.content, m.created_at));
+      messages.forEach(m => addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime));
       scrollToBottom();
     } catch (e) {
       console.error('Failed to open conversation:', e);
@@ -357,7 +357,7 @@
             </div>
           `;
         } else {
-          messages.forEach(m => addMsg(m.sender, m.content, m.created_at));
+          messages.forEach(m => addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime));
           scrollToBottom();
         }
       }
@@ -461,6 +461,114 @@
       adminForm.dispatchEvent(new Event('submit'));
     }
   });
+  
+  // File upload function
+  async function uploadFile(file) {
+    if (!selectedConv) return false;
+    
+    const formData = new FormData();
+    formData.append('conversation_id', selectedConv);
+    formData.append('file', file);
+    
+    try {
+      const response = await fetch('/api/admin/upload', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        return result;
+      } else {
+        const error = await response.json();
+        throw new Error(error.detail || 'Upload failed');
+      }
+    } catch (e) {
+      console.error('Failed to upload file:', e);
+      throw e;
+    }
+  }
+  
+  // Handle file selection
+  function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file || !selectedConv) return;
+    
+    // Validate file type
+    const allowedTypes = {
+      'image/jpeg': 'image',
+      'image/png': 'image', 
+      'image/gif': 'image',
+      'image/webp': 'image',
+      'audio/mpeg': 'audio',
+      'audio/wav': 'audio',
+      'audio/ogg': 'audio',
+      'audio/webm': 'audio',
+      'audio/mp4': 'audio'
+    };
+    
+    if (!allowedTypes[file.type]) {
+      showNotificationFunc('Desteklenmeyen dosya türü. Sadece resim ve ses dosyaları kabul edilir.', 'error');
+      return;
+    }
+    
+    const fileType = allowedTypes[file.type];
+    const maxSize = fileType === 'image' ? 5 * 1024 * 1024 : 10 * 1024 * 1024; // 5MB for images, 10MB for audio
+    
+    if (file.size > maxSize) {
+      showNotificationFunc(`Dosya çok büyük. Maksimum boyut: ${maxSize / 1024 / 1024}MB`, 'error');
+      return;
+    }
+    
+    // Show uploading message
+    const uploadingMsg = `📤 ${fileType === 'image' ? 'Resim' : 'Ses dosyası'} yükleniyor...`;
+    addMsg('admin', uploadingMsg, null, 'text');
+    
+    // Upload file
+    uploadFile(file)
+      .then(result => {
+        // Remove uploading message
+        const lastMsg = adminMessages.lastElementChild;
+        if (lastMsg && lastMsg.textContent.includes('yükleniyor')) {
+          lastMsg.remove();
+        }
+        
+        // File will appear in next poll, but show immediate feedback
+        const fileName = file.name || `${fileType} dosyası`;
+        addMsg('admin', `📎 ${fileName}`, null, fileType, result.file_url, result.file_size, file.type);
+      })
+      .catch(error => {
+        // Remove uploading message
+        const lastMsg = adminMessages.lastElementChild;
+        if (lastMsg && lastMsg.textContent.includes('yükleniyor')) {
+          lastMsg.remove();
+        }
+        
+        showNotificationFunc(`Dosya yüklenemedi: ${error.message}`, 'error');
+      });
+    
+    // Clear file input
+    event.target.value = '';
+  }
+  
+  // File input handler
+  const adminFileInput = document.getElementById('adminFileInput');
+  if (adminFileInput) {
+    adminFileInput.addEventListener('change', handleFileSelect);
+  }
+  
+  // File upload button handler
+  const adminFileBtn = document.getElementById('adminFileBtn');
+  if (adminFileBtn && adminFileInput) {
+    adminFileBtn.addEventListener('click', () => {
+      if (!selectedConv) {
+        showNotificationFunc('Lütfen önce bir sohbet seçin', 'error');
+        return;
+      }
+      adminFileInput.click();
+    });
+  }
 
   backBtn.addEventListener('click', () => {
     showUsersLayer();
