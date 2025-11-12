@@ -260,9 +260,6 @@
     }
     return false;
   }
-    
-    // WebSocket functionality replaced with HTTP polling above
-  }
 
   // Event listeners
   startBtn.addEventListener('click', () => {
@@ -283,16 +280,12 @@
     }
   });
 
-  msgForm.addEventListener('submit', (e) => {
+  msgForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = (msgInput.value || '').trim();
     if (!text) return;
     if (text.length > 2000) {
       showNotificationFunc('Mesaj çok uzun (max 2000 karakter)', 'error');
-      return;
-    }
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      showNotificationFunc('Bağlantı yok. Lütfen bekleyin...', 'error');
       return;
     }
     
