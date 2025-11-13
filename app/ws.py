@@ -22,6 +22,11 @@ def sanitize(text: str) -> str:
     """
     return html.escape(text or "")[:settings.MAX_MESSAGE_LEN]
 
+def _public_file_url(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    return "/files/" + path.replace("\\", "/")
+
 def _fire_and_forget(coro, label: str):
     async def _runner():
         try:
@@ -237,8 +242,24 @@ async def handle_client(ws: WebSocket):
             history = [m for m, v in reversed(rows)]
             if rows:
                 visitor_name = rows[0][1].display_name
-        await manager.send(ws, {"type":"history","conversation_id":str(conv_id),"visitor_name":visitor_name,
-                                "messages":[{"id":str(m.id),"sender":m.sender,"message_type":m.message_type,"content":m.content,"file_url":f"/files/{m.file_path.replace('\\', '/')}" if m.file_path else None,"file_size":m.file_size,"file_mime":m.file_mime,"created_at":m.created_at.isoformat()} for m in history]})
+        history_payload = []
+        for m in history:
+            history_payload.append({
+                "id": str(m.id),
+                "sender": m.sender,
+                "message_type": m.message_type,
+                "content": m.content,
+                "file_url": _public_file_url(m.file_path),
+                "file_size": m.file_size,
+                "file_mime": m.file_mime,
+                "created_at": m.created_at.isoformat()
+            })
+        await manager.send(ws, {
+            "type": "history",
+            "conversation_id": str(conv_id),
+            "visitor_name": visitor_name,
+            "messages": history_payload
+        })
     else:
         await ws.close(code=1008)
         return
