@@ -16,7 +16,8 @@ MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Upload directory
 UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR = UPLOAD_DIR.resolve()
 
 def get_file_type(mime_type: str) -> str:
     """Determine file type from MIME type"""
@@ -46,8 +47,8 @@ async def save_file(file: UploadFile, conversation_id: str) -> tuple[str, int, s
     unique_filename = f"{uuid.uuid4()}{file_ext}"
     
     # Create conversation subdirectory
-    conv_dir = UPLOAD_DIR / conversation_id
-    conv_dir.mkdir(exist_ok=True)
+    conv_dir = (UPLOAD_DIR / conversation_id).resolve()
+    conv_dir.mkdir(parents=True, exist_ok=True)
     
     file_path = conv_dir / unique_filename
     file_size = 0
@@ -65,15 +66,24 @@ async def save_file(file: UploadFile, conversation_id: str) -> tuple[str, int, s
                 raise HTTPException(status_code=413, detail=f"File too large. Max size: {max_size//1024//1024}MB")
             await f.write(chunk)
     
-    # Return relative path for database storage
-    relative_path = str(file_path.relative_to(Path.cwd()))
+    # Return path relative to uploads directory for database storage
+    relative_path = file_path.relative_to(UPLOAD_DIR).as_posix()
     return relative_path, file_size, file_type
 
 def delete_file(file_path: str) -> bool:
     """Delete file from filesystem"""
     try:
-        if file_path and os.path.exists(file_path):
-            os.unlink(file_path)
+        if not file_path:
+            return False
+        candidate = Path(file_path)
+        if not candidate.is_absolute():
+            candidate_str = str(candidate).lstrip("/\\")
+            if candidate_str.startswith("uploads/"):
+                candidate_str = candidate_str[len("uploads/"):]
+            candidate = (UPLOAD_DIR / candidate_str).resolve()
+        candidate.relative_to(UPLOAD_DIR)  # ensure within uploads
+        if candidate.exists():
+            os.unlink(candidate)
             return True
     except Exception:
         pass
@@ -83,4 +93,7 @@ def get_file_url(file_path: str) -> str:
     """Generate file URL for serving"""
     if not file_path:
         return ""
-    return f"/files/{file_path.replace(os.sep, '/')}"
+    normalized = file_path.replace(os.sep, '/').lstrip('/')
+    if normalized.startswith("uploads/"):
+        normalized = normalized[len("uploads/"):]
+    return f"/files/{normalized}"

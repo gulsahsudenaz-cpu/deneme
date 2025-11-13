@@ -7,6 +7,7 @@ from app.db import session_scope
 from app.models import Conversation, Message, TelegramLink
 from datetime import datetime
 from app.logger import logger
+from app.monitoring import record_background_error
 
 router = APIRouter()
 
@@ -54,12 +55,21 @@ async def notify_new_visitor(conv_id: uuid.UUID, visitor_name: str):
     except Exception as e:
         # Log error but don't fail the request
         logger.error(f"Failed to send Telegram notification: {e}", exc_info=True)
+        record_background_error("notify_new_visitor", e)
 
-async def notify_visitor_message(conv_id: uuid.UUID, visitor_name: str, content: str):
+async def notify_visitor_message(
+    conv_id: uuid.UUID,
+    visitor_name: str,
+    content: str,
+    file_url: str | None = None,
+    message_type: str = "text"
+):
     from app.i18n import t
     # Truncate content if too long for Telegram (max 4096 chars, but we limit to 2000)
     # Content is already sanitized, so safe to send
     text = t("visitor_message", name=visitor_name, content=content, conv_id=str(conv_id))
+    if file_url:
+        text = f"{text}\n📎 {message_type.capitalize() if message_type else 'Dosya'}: {file_url}"
     # Telegram has a 4096 character limit, but we're already limiting to 2000
     if len(text) > 4096:
         text = text[:4090] + "..."
@@ -76,6 +86,7 @@ async def notify_visitor_message(conv_id: uuid.UUID, visitor_name: str, content:
     except Exception as e:
         # Log error but don't fail the request
         logger.error(f"Failed to send Telegram notification: {e}", exc_info=True)
+        record_background_error("notify_visitor_message", e)
 
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
@@ -145,4 +156,3 @@ async def telegram_webhook(request: Request):
         "via":"telegram"
     })
     return {"ok": True}
-

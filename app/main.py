@@ -23,6 +23,7 @@ from app.activity_logger import log_admin_activity
 from app.ws import manager, handle_client, handle_admin, sanitize
 from app.telegram import router as telegram_router
 from app.rate_limit import ws_rate_limiter
+from app.monitoring import SystemMonitor, record_background_error, get_recent_background_errors
 from app.logger import logger
 
 app = FastAPI(title="Private Support Chat", version="1.0.0")
@@ -85,37 +86,35 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # Rate limiting middleware for REST API
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # TEMPORARILY DISABLE ALL RATE LIMITING FOR RAILWAY DEBUGGING
+        path = request.url.path
+        skip_paths = {"/health", "/health/detailed", "/", "/admin", "/favicon.ico", "/debug", "/test"}
+        skip_prefixes = ["/static", "/files", "/ws/"]
+
+        if path in skip_paths or any(path.startswith(prefix) for prefix in skip_prefixes):
+            return await call_next(request)
+
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
+        ident = f"api:{client_ip}"
+
+        per_second = max(1, settings.API_REQ_PER_5MIN // 60 or 1)
+        burst = max(10, settings.API_REQ_PER_5MIN // 5 or 10)
+
+        if not ws_rate_limiter.allow_api(ident, per_second, burst):
+            logger.warning(f"Rate limit exceeded for {client_ip} on {path}")
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Too many requests",
+                    "detail": "Rate limit exceeded. Please try again later."
+                },
+                headers={"Retry-After": "60"}
+            )
+
         return await call_next(request)
-        
-        # Original rate limiting code (disabled)
-        # # Skip rate limiting for health check, static files, WebSocket upgrade, and visitor API
-        # skip_paths = ["/health", "/health/detailed", "/", "/admin", "/favicon.ico", "/debug", "/test"]
-        # skip_prefixes = ["/static", "/ws/", "/api/visitor/"]
-        # 
-        # if (request.url.path in skip_paths or 
-        #     any(request.url.path.startswith(prefix) for prefix in skip_prefixes)):
-        #     return await call_next(request)
-        # 
-        # # Get client identifier (use X-Forwarded-For if behind proxy)
-        # forwarded_for = request.headers.get("X-Forwarded-For")
-        # if forwarded_for:
-        #     client_ip = forwarded_for.split(",")[0].strip()
-        # else:
-        #     client_ip = request.client.host if request.client else "unknown"
-        # ident = f"api:{client_ip}"
-        # 
-        # # Rate limit: 300 requests per 5 minutes = ~1 req/sec, burst of 20 (increased for HTTP polling)
-        # rate_per_sec = 300 / 300  # 1 req/sec
-        # if not ws_rate_limiter.allow_api(ident, rate_per_sec, 20):
-        #     logger.warning(f"Rate limit exceeded for {client_ip} on {request.url.path}")
-        #     return JSONResponse(
-        #         status_code=429,
-        #         content={"error": "Too many requests", "detail": "Rate limit exceeded. Please try again later."},
-        #         headers={"Retry-After": "60"}
-        #     )
-        # 
-        # return await call_next(request)
 
 # Middleware order matters: Request size limit -> Security headers -> Rate limiting
 app.add_middleware(RequestSizeLimitMiddleware)
@@ -255,7 +254,6 @@ async def websocket_test():
 async def health_detailed():
     """Detailed health check endpoint with system status"""
     from datetime import datetime
-    from app.monitoring import SystemMonitor
     
     # Check database connection
     db_status = "ok"
@@ -285,6 +283,8 @@ async def health_detailed():
         logger.error(f"System health check error: {e}")
         system_health = {"status": "error", "error": str(e)}
     
+    background_errors = get_recent_background_errors()
+    
     # Determine overall status
     overall_status = "ok"
     if db_status != "ok":
@@ -300,6 +300,7 @@ async def health_detailed():
         "websocket_clients": len(manager.clients),
         "websocket_admins": len(manager.admins),
         "system": system_health,
+        "background_errors": background_errors[-5:],
         "version": "2.0.0"
     }
 
@@ -407,7 +408,10 @@ async def visitor_send(request: Request):
     await manager.broadcast_to_conversation(conv_id, {"type": "message", "conversation_id": str(conv_id), "sender": "visitor", "message_type": "text", "content": content})
     
     from app.telegram import notify_visitor_message
-    _schedule_background_task(notify_visitor_message(conv_id, visitor_name, content), "notify_visitor_message")
+    _schedule_background_task(
+        notify_visitor_message(conv_id, visitor_name, content),
+        "notify_visitor_message"
+    )
     
     from app.cache import cache
     await cache.delete_by_pattern("conversations:*")
@@ -416,11 +420,16 @@ async def visitor_send(request: Request):
     return {"ok": True}
 
 @app.post("/api/visitor/upload")
-async def visitor_upload(conversation_id: str = Form(), file: UploadFile = File()):
+async def visitor_upload(request: Request, conversation_id: str = Form(), file: UploadFile = File()):
     try:
         conv_id = uuid.UUID(conversation_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid conversation ID")
+    
+    client_ip = _get_client_ip(request)
+    ident = f"visitor_upload:{client_ip}"
+    if not ws_rate_limiter.allow_api(ident, 0.2, 2):
+        raise HTTPException(status_code=429, detail="Too many upload attempts")
     
     async with session_scope() as s:
         # Verify conversation exists
@@ -465,7 +474,13 @@ async def visitor_upload(conversation_id: str = Form(), file: UploadFile = File(
             visitor = res.scalar_one_or_none()
             if visitor:
                 _schedule_background_task(
-                    notify_visitor_message(conv_id, visitor.display_name, f"📎 {content}"),
+                    notify_visitor_message(
+                        conv_id,
+                        visitor.display_name,
+                        f"📎 {content}",
+                        file_url,
+                        file_type
+                    ),
                     "notify_visitor_message_file"
                 )
         
@@ -499,7 +514,7 @@ async def request_otp():
     except Exception as e:
         # Log error but return sent=False to indicate failure
         logger.error(f"Failed to send OTP via Telegram: {e}", exc_info=True)
-        return OTPRequestResponse(sent=False)
+        return OTPRequestResponse(sent=False, error=str(e))
 
 @app.post("/api/admin/login", response_model=AdminLoginResponse)
 async def admin_login(request: Request, payload: AdminLoginRequest):
@@ -578,11 +593,16 @@ async def admin_send(msg: SendAdminMessage, response: Response, admin=Depends(ge
     return {"ok": True}
 
 @app.post("/api/admin/upload")
-async def admin_upload(conversation_id: str = Form(), file: UploadFile = File(), response: Response = None, admin=Depends(get_current_admin)):
+async def admin_upload(request: Request, conversation_id: str = Form(), file: UploadFile = File(), response: Response = None, admin=Depends(get_current_admin)):
     # Check if token was rotated and set response header
     if admin.get("rotated") and admin.get("token"):
         response.headers["X-New-Token"] = admin["token"]
         response.headers["X-Token-Rotated"] = "true"
+    
+    client_ip = _get_client_ip(request)
+    ident = f"admin_upload:{client_ip}"
+    if not ws_rate_limiter.allow_api(ident, 0.5, 3):
+        raise HTTPException(status_code=429, detail="Too many upload attempts")
     
     try:
         conv_id = uuid.UUID(conversation_id)
@@ -1097,7 +1117,6 @@ async def comprehensive_system_test():
     # 8. System Resources Tests
     system_tests = {}
     try:
-        from app.monitoring import SystemMonitor
         metrics = SystemMonitor.get_system_metrics()
         if "error" not in metrics:
             system_tests["system_metrics"] = {"status": "✅ PASS", "message": f"CPU: {metrics['cpu_percent']}%, Memory: {metrics['memory_percent']}%"}
@@ -1265,6 +1284,7 @@ def _schedule_background_task(coro, label: str):
             await coro
         except Exception as exc:
             logger.error(f"Background task {label} failed: {exc}", exc_info=True)
+            record_background_error(label, exc)
     asyncio.create_task(_runner())
 
 def _ensure_debug_allowed():

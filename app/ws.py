@@ -320,7 +320,10 @@ async def handle_client(ws: WebSocket):
                 "type":"message","conversation_id":str(conv_id),"sender":"visitor","message_type":"text","content":content
             })
             # telegram notify
-            _fire_and_forget(notify_visitor_message(conv_id, display_name, content), "notify_visitor_message_ws")
+            _fire_and_forget(
+                notify_visitor_message(conv_id, display_name, content),
+                "notify_visitor_message_ws"
+            )
 
         elif msg.get("type") == "typing":
             # Broadcast typing indicator to admin

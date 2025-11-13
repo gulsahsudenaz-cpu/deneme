@@ -28,9 +28,9 @@
   const totalMessages = document.getElementById('totalMessages');
 
   let token = localStorage.getItem('admin_token');
-  let ws = null;
   let selectedConv = null;
   let conversations = [];
+  const messageCache = new Map();
 
   function setWsState(ok) {
     if (ok) {
@@ -86,6 +86,7 @@
     loginModal.style.display = 'flex';
     usersLayer.classList.add('hidden');
     chatLayer.classList.add('hidden');
+    messageCache.clear();
   }
 
   function showUsersLayer() {
@@ -93,6 +94,7 @@
     usersLayer.classList.remove('hidden');
     chatLayer.classList.add('hidden');
     selectedConv = null;
+    messageCache.clear();
     loadConversations();
   }
 
@@ -137,6 +139,19 @@
     return name ? name.charAt(0).toUpperCase() : '?';
   };
 
+  function resetConversationCache(convId) {
+    if (!convId) return;
+    messageCache.set(convId, []);
+  }
+
+  function rememberMessages(convId, ids) {
+    messageCache.set(convId, ids.slice(-200));
+  }
+
+  function getCachedMessages(convId) {
+    return messageCache.get(convId) || [];
+  }
+
   async function api(path, opts = {}) {
     opts.headers = opts.headers || {};
     if (token) opts.headers['Authorization'] = `Bearer ${token}`;
@@ -151,11 +166,6 @@
     if (tokenRotated === 'true' && newToken) {
       token = newToken;
       localStorage.setItem('admin_token', token);
-      // If WebSocket is connected, reconnect with new token
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close();
-        connectWSWithToken();
-      }
     }
     return r.json();
   }
@@ -174,7 +184,7 @@
       renderConversationsList(data);
     } catch (e) {
       console.error('Failed to load conversations:', e);
-      showNotification('Sohbetler yüklenemedi', 'error');
+      showNotificationFunc('Sohbetler yüklenemedi', 'error');
     }
   }
 
@@ -228,90 +238,200 @@
     });
   }
 
-  async function openConversation(id, nameText) {
-    try {
-      selectedConv = id;
-      convTitle.textContent = nameText;
-      // Set avatar with initial (avatar already has CSS class)
-      const initial = getUserInitialFunc(nameText);
-      chatUserAvatar.textContent = initial;
-      chatUserAvatar.className = 'user-avatar';
-      userStatus.textContent = 'Aktif';
-      userStatus.style.color = '#10b981';
-      adminMessages.innerHTML = '';
-      
-      // Update active state in list
-      convList.querySelectorAll('.user-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.id === id);
-      });
-      
-      showChatLayer();
-      
-      // Load messages
-      const result = await api(`/api/admin/messages/${id}`);
-      
-      // Handle new response format (with cursor) or old format (array)
-      const messages = Array.isArray(result) ? result : (result.messages || []);
-      
-      if (messages.length === 0) {
-        adminMessages.innerHTML = `
-          <div class="empty-state">
-            <i class="fas fa-comment-dots"></i>
-            <h4>Henüz mesaj yok</h4>
-            <p>İlk mesajı siz gönderin</p>
-          </div>
-        `;
-        return;
-      }
 
-      messages.forEach(m => addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime));
-      scrollToBottom();
-    } catch (e) {
-      console.error('Failed to open conversation:', e);
-      showNotification('Sohbet yüklenemedi', 'error');
-      selectedConv = null;
-      convTitle.textContent = 'Sohbet seçiniz';
-    }
-  }
+async function openConversation(id, nameText) {
+  try {
+    selectedConv = id;
+    convTitle.textContent = nameText;
+    // Set avatar with initial (avatar already has CSS class)
+    const initial = getUserInitialFunc(nameText);
+    chatUserAvatar.textContent = initial;
+    chatUserAvatar.className = 'user-avatar';
+    userStatus.textContent = 'Aktif';
+    userStatus.style.color = '#10b981';
+    adminMessages.innerHTML = '';
+    resetConversationCache(id);
 
-  function addMsg(sender, content, createdAt = null) {
-    // Remove empty state if exists
-    const emptyState = adminMessages.querySelector('.empty-state');
-    if (emptyState) {
-      emptyState.remove();
+    // Update active state in list
+    convList.querySelectorAll('.user-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.id === id);
+    });
+
+    showChatLayer();
+
+    // Load messages
+    const result = await api(`/api/admin/messages/${id}`);
+
+    // Handle new response format (with cursor) or old format (array)
+    const messages = Array.isArray(result) ? result : (result.messages || []);
+
+    if (messages.length === 0) {
+      renderEmptyMessages();
+      rememberMessages(id, []);
+      return;
     }
 
-    const div = document.createElement('div');
-    div.className = `message ${sender === 'admin' ? 'admin' : ''}`;
-    
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = sender === 'admin' ? 'A' : getUserInitialFunc(convTitle.textContent);
-    div.appendChild(avatar);
-    
-    const bubble = document.createElement('div');
-    bubble.className = 'message-bubble';
-    
-    const text = document.createElement('div');
-    text.className = 'message-text';
-    text.textContent = content;
-    bubble.appendChild(text);
-    
-    if (createdAt) {
-      const time = document.createElement('div');
-      time.className = 'message-time';
-      time.textContent = formatTimeFunc(createdAt);
-      bubble.appendChild(time);
-    }
-    
-    div.appendChild(bubble);
-    adminMessages.appendChild(div);
+    adminMessages.innerHTML = '';
+    messages.forEach(m => addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime));
+    rememberMessages(id, messages.map(m => m.id));
     scrollToBottom();
+  } catch (e) {
+    console.error('Failed to open conversation:', e);
+    showNotificationFunc('Sohbet yüklenemedi', 'error');
+    selectedConv = null;
+    convTitle.textContent = 'Sohbet seçiniz';
+  }
+}
+
+
+
+function addMsg(sender, content, createdAt = null, messageType = 'text', fileUrl = null, fileSize = null, fileMime = null) {
+  const emptyState = adminMessages.querySelector('.empty-state');
+  if (emptyState) {
+    emptyState.remove();
   }
 
-  function scrollToBottom() {
-    adminMessages.scrollTop = adminMessages.scrollHeight;
+  const div = document.createElement('div');
+  div.className = `message ${sender === 'admin' ? 'admin' : ''}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.textContent = sender === 'admin' ? 'A' : getUserInitialFunc(convTitle.textContent);
+  div.appendChild(avatar);
+
+  const bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+
+  const hasFilePreview = Boolean(fileUrl && messageType !== 'text');
+
+  if (hasFilePreview) {
+    if (messageType === 'image') {
+      const img = document.createElement('img');
+      img.src = fileUrl;
+      img.alt = content || 'Image';
+      img.className = 'message-image';
+      img.style.maxWidth = '220px';
+      img.style.borderRadius = '8px';
+      img.style.cursor = 'pointer';
+      img.addEventListener('click', () => window.open(fileUrl, '_blank'));
+      bubble.appendChild(img);
+    } else if (messageType === 'audio') {
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.src = fileUrl;
+      audio.style.width = '100%';
+      bubble.appendChild(audio);
+    }
   }
+
+  if (content) {
+    const textNode = document.createElement('div');
+    textNode.className = 'message-text';
+    textNode.textContent = content;
+    bubble.appendChild(textNode);
+  }
+
+  if (fileUrl) {
+    const meta = document.createElement('div');
+    meta.className = 'message-file';
+
+    const link = document.createElement('a');
+    link.href = fileUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Dosyayı aç';
+    meta.appendChild(link);
+
+    if (fileSize) {
+      const size = document.createElement('span');
+      size.textContent = ` • ${formatFileSize(fileSize)}`;
+      meta.appendChild(size);
+    }
+
+    if (fileMime) {
+      const mime = document.createElement('span');
+      mime.textContent = ` • ${fileMime}`;
+      meta.appendChild(mime);
+    }
+
+    bubble.appendChild(meta);
+  }
+
+  const time = document.createElement('div');
+  time.className = 'message-time';
+  if (createdAt) {
+    time.textContent = formatTimeFunc(createdAt);
+  } else {
+    time.textContent = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  }
+  bubble.appendChild(time);
+
+  div.appendChild(bubble);
+  adminMessages.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
+function scrollToBottom() {
+  adminMessages.scrollTop = adminMessages.scrollHeight;
+}
+
+function formatFileSize(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function renderEmptyMessages() {
+  adminMessages.innerHTML = `
+    <div class="empty-state">
+      <i class="fas fa-comment-dots"></i>
+      <h4>Henüz mesaj yok</h4>
+      <p>İlk mesajı siz gönderin</p>
+    </div>
+  `;
+}
+
+function removeTempMessage(sender) {
+  if (sender !== 'admin') return;
+  const temp = adminMessages.querySelector('.message[data-temp="true"]');
+  if (temp) {
+    temp.remove();
+  }
+}
+
+function syncConversationMessages(convId, messages) {
+  const cachedIds = getCachedMessages(convId);
+
+  if (messages.length === 0) {
+    renderEmptyMessages();
+    rememberMessages(convId, []);
+    return;
+  }
+
+  if (!cachedIds.length || messages.length < cachedIds.length) {
+    adminMessages.innerHTML = '';
+    messages.forEach(m => addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime));
+    rememberMessages(convId, messages.map(m => m.id));
+    scrollToBottom();
+    return;
+  }
+
+  const known = new Set(cachedIds);
+  const newOnes = messages.filter(m => !known.has(m.id));
+  if (!newOnes.length) {
+    return;
+  }
+
+  newOnes.forEach(m => {
+    removeTempMessage(m.sender);
+    addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime);
+  });
+
+  rememberMessages(convId, cachedIds.concat(newOnes.map(m => m.id)));
+  scrollToBottom();
+}
 
   // HTTP Polling (WebSocket replacement for Railway)
   let pollingInterval;
@@ -336,51 +456,43 @@
     }
   }
   
+
+
   async function loadSelectedConversationMessages() {
     if (!selectedConv) return;
-    
+  
     try {
       const result = await api(`/api/admin/messages/${selectedConv}`);
       const messages = Array.isArray(result) ? result : (result.messages || []);
-      
-      // Only update if message count changed
-      const currentMsgCount = adminMessages.querySelectorAll('.message').length;
-      if (messages.length !== currentMsgCount) {
-        // Clear and reload messages
-        adminMessages.innerHTML = '';
-        if (messages.length === 0) {
-          adminMessages.innerHTML = `
-            <div class="empty-state">
-              <i class="fas fa-comment-dots"></i>
-              <h4>Henüz mesaj yok</h4>
-              <p>İlk mesajı siz gönderin</p>
-            </div>
-          `;
-        } else {
-          messages.forEach(m => addMsg(m.sender, m.content, m.created_at, m.message_type, m.file_url, m.file_size, m.file_mime));
-          scrollToBottom();
-        }
-      }
+      syncConversationMessages(selectedConv, messages);
     } catch (e) {
       console.error('Failed to load conversation messages:', e);
     }
   }
-
+  
   // Event listeners
+
+
   reqOtpBtn.addEventListener('click', async () => {
     showLoginMessage('Kod gönderiliyor...', 'info');
+    reqOtpBtn.disabled = true;
+    reqOtpBtn.classList.add('loading');
     try {
       const r = await fetch('/api/admin/request_otp', { method: 'POST' });
       const data = await r.json();
-      if (data.sent) {
-        showLoginMessage('Kod Telegram\'a gönderildi!', 'success');
+      if (r.ok && data.sent) {
+        showLoginMessage('Kod Telegram'a gönderildi!', 'success');
         otpInput.focus();
       } else {
-        showLoginMessage('Hata: Kod gönderilemedi.', 'error');
+        const reason = (data && data.error) ? data.error : 'Kod gönderilemedi.';
+        showLoginMessage(`Hata: ${reason}`, 'error');
       }
     } catch (e) {
       console.error('Failed to request OTP:', e);
       showLoginMessage('Hata: OTP istenemedi.', 'error');
+    } finally {
+      reqOtpBtn.disabled = false;
+      reqOtpBtn.classList.remove('loading');
     }
   });
 
@@ -419,34 +531,35 @@
     }
   });
 
+
+
   adminForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!selectedConv) return;
-    const text = (adminInput.value || '').trim();
-    if (!text) return;
-    if (text.length > 2000) {
-      showNotification('Mesaj çok uzun (max 2000 karakter)', 'error');
+    const textValue = (adminInput.value || '').trim();
+    if (!textValue) return;
+    if (textValue.length > 2000) {
+      showNotificationFunc('Mesaj çok uzun (max 2000 karakter)', 'error');
       return;
     }
-    
-    // Optimistically add message to UI
-    addMsg('admin', text);
+    const tempMsg = addMsg('admin', textValue);
+    tempMsg.dataset.temp = 'true';
     adminInput.value = '';
     autoResizeTextareaFunc(adminInput);
-    
     try {
-      // Send via HTTP API (WebSocket not available on Railway)
       await api('/api/admin/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversation_id: selectedConv,
-          content: text
+          content: textValue
         })
       });
-      // Message will appear in next poll cycle
     } catch (e) {
       console.error('Failed to send message:', e);
+      if (tempMsg && tempMsg.parentElement) {
+        tempMsg.remove();
+      }
       showNotificationFunc('Mesaj gönderilemedi', 'error');
     }
   });

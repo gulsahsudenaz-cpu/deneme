@@ -1,7 +1,8 @@
 import time
 import psutil
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
+from collections import deque
 from app.logger import logger
 
 class SystemMonitor:
@@ -56,3 +57,22 @@ class SystemMonitor:
             "warnings": warnings,
             "metrics": metrics
         }
+
+_background_errors = deque(maxlen=50)
+
+def record_background_error(label: str, error: Exception | str) -> None:
+    """Store background task errors for later inspection"""
+    try:
+        _background_errors.append({
+            "label": label,
+            "error": str(error),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as exc:
+        logger.error(f"Failed to record background error: {exc}")
+
+def get_recent_background_errors(limit: int = 50) -> List[dict]:
+    """Return recent background task errors"""
+    if limit <= 0:
+        return []
+    return list(_background_errors)[-limit:]

@@ -28,6 +28,7 @@ class AdminLoginResponse(BaseModel):
 
 class OTPRequestResponse(BaseModel):
     sent: bool
+    error: Optional[str] = None
 
 class SendAdminMessage(BaseModel):
     conversation_id: uuid.UUID
