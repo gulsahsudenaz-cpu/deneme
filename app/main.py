@@ -24,6 +24,7 @@ from app.ws import manager, handle_client, handle_admin, sanitize
 from app.telegram import router as telegram_router
 from app.rate_limit import ws_rate_limiter
 from app.monitoring import SystemMonitor, record_background_error, get_recent_background_errors
+from app.file_handler import get_file_url
 from app.logger import logger
 
 app = FastAPI(title="Private Support Chat", version="1.0.0")
