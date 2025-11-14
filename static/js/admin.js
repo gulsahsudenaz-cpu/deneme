@@ -746,10 +746,21 @@ function syncConversationMessages(convId, messages) {
     renderConversationsList(conversations);
   });
 
-  // Initialize
+  // Initialize - Check token validity
   if (token) {
-    showUsersLayer();
-    startPolling(); // Use HTTP polling instead of WebSocket
+    // Test token validity before showing users layer
+    api('/api/admin/conversations')
+      .then(() => {
+        showUsersLayer();
+        startPolling();
+      })
+      .catch(() => {
+        // Token invalid, clear and show login
+        localStorage.removeItem('admin_token');
+        token = null;
+        showLoginLayer();
+        showNotificationFunc('Oturum süresi dolmuş, tekrar giriş yapın', 'error');
+      });
   } else {
     showLoginLayer();
   }
