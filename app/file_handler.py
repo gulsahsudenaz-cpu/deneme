@@ -93,7 +93,10 @@ def get_file_url(file_path: str) -> str:
     """Generate file URL for serving"""
     if not file_path:
         return ""
-    normalized = file_path.replace(os.sep, '/').lstrip('/')
+    # Normalize path separators and ensure proper format
+    normalized = file_path.replace(os.sep, '/').replace('\\', '/')
+    # Remove leading slashes and uploads prefix if present
+    normalized = normalized.lstrip('/')
     if normalized.startswith("uploads/"):
         normalized = normalized[len("uploads/"):]
     return f"/files/{normalized}"

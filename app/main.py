@@ -371,7 +371,7 @@ async def visitor_messages(conversation_id: str):
             "sender": m.sender,
             "message_type": m.message_type,
             "content": m.content,
-            "file_url": f"/files/{m.file_path.replace(os.sep, '/')}" if m.file_path else None,
+            "file_url": get_file_url(m.file_path) if m.file_path else None,
             "file_size": m.file_size,
             "file_mime": m.file_mime,
             "created_at": m.created_at.isoformat()
@@ -805,7 +805,7 @@ async def list_messages(conversation_id: str, response: Response, admin=Depends(
             "sender": m.sender,
             "message_type": m.message_type,
             "content": m.content,
-            "file_url": f"/files/{m.file_path.replace(os.sep, '/')}" if m.file_path else None,
+            "file_url": get_file_url(m.file_path) if m.file_path else None,
             "file_size": m.file_size,
             "file_mime": m.file_mime,
             "created_at": m.created_at.isoformat()
@@ -899,7 +899,7 @@ async def search_messages(q: str, response: Response, admin=Depends(get_current_
             "sender": msg.sender,
             "message_type": msg.message_type,
             "content": msg.content,
-            "file_url": f"/files/{msg.file_path.replace(os.sep, '/')}" if msg.file_path else None,
+            "file_url": get_file_url(msg.file_path) if msg.file_path else None,
             "file_size": msg.file_size,
             "file_mime": msg.file_mime,
             "created_at": msg.created_at.isoformat()
