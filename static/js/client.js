@@ -433,17 +433,23 @@
     }
   });
   
-  // File input handler
+  // File input handler - FIXED
   const fileInput = document.getElementById('fileInput');
+  const fileBtn = document.getElementById('fileBtn');
+  
   if (fileInput) {
     fileInput.addEventListener('change', handleFileSelect);
   }
   
-  // File upload button handler
-  const fileBtn = document.getElementById('fileBtn');
-  if (fileBtn && fileInput) {
+  if (fileBtn) {
     fileBtn.addEventListener('click', () => {
-      fileInput.click();
+      if (!conversationId) {
+        showNotificationFunc('Önce sohbete bağlanın', 'error');
+        return;
+      }
+      if (fileInput) {
+        fileInput.click();
+      }
     });
   }
 

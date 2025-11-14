@@ -225,7 +225,12 @@ async def debug_info():
         "files": os.listdir(".") if os.path.exists(".") else "not found",
         "allowed_origins": settings.ALLOWED_ORIGINS,
         "app_env": settings.APP_ENV,
-        "force_https": settings.FORCE_HTTPS
+        "force_https": settings.FORCE_HTTPS,
+        "telegram_config": {
+            "bot_token_set": bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_BOT_TOKEN != "YOUR_REAL_BOT_TOKEN_HERE"),
+            "chat_id_set": bool(settings.TELEGRAM_DEFAULT_CHAT_ID and str(settings.TELEGRAM_DEFAULT_CHAT_ID) != "YOUR_REAL_CHAT_ID_HERE"),
+            "webhook_secret_set": bool(settings.TELEGRAM_WEBHOOK_SECRET)
+        }
     }
 
 @app.get("/favicon.ico")
@@ -504,12 +509,23 @@ async def visitor_upload(request: Request, conversation_id: str = Form(), file: 
 async def request_otp():
     from app.telegram import tg_send
     try:
+        # Validate Telegram configuration first
+        if not settings.TELEGRAM_BOT_TOKEN:
+            logger.error("Telegram bot token not configured")
+            return OTPRequestResponse(sent=False, error="Telegram bot token not configured")
+        
+        if not settings.TELEGRAM_DEFAULT_CHAT_ID:
+            logger.error("Telegram default chat ID not configured")
+            return OTPRequestResponse(sent=False, error="Telegram chat ID not configured")
+        
         code, expires = await create_otp()
         # send to configured admin chat
         from app.i18n import t
         text = t("admin_login_code", code=code, ttl=settings.ADMIN_CODE_TTL_SECONDS//60)
+        
+        logger.info(f"Sending OTP to Telegram chat: {settings.TELEGRAM_DEFAULT_CHAT_ID}")
         await tg_send(settings.TELEGRAM_DEFAULT_CHAT_ID, text)
-        logger.info("OTP requested and sent via Telegram")
+        logger.info("OTP requested and sent via Telegram successfully")
         return OTPRequestResponse(sent=True)
     except Exception as e:
         # Log error but return sent=False to indicate failure

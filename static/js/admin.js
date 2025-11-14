@@ -478,18 +478,28 @@ function syncConversationMessages(convId, messages) {
     reqOtpBtn.disabled = true;
     reqOtpBtn.classList.add('loading');
     try {
-      const r = await fetch('/api/admin/request_otp', { method: 'POST' });
+      const r = await fetch('/api/admin/request_otp', { 
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}`);
+      }
+      
       const data = await r.json();
-      if (r.ok && data.sent) {
-        showLoginMessage('Kod Telegram'a gönderildi!', 'success');
+      if (data.sent) {
+        showLoginMessage('Kod Telegram\'a gönderildi! ✅', 'success');
         otpInput.focus();
       } else {
-        const reason = (data && data.error) ? data.error : 'Kod gönderilemedi.';
-        showLoginMessage(`Hata: ${reason}`, 'error');
+        const reason = data.error || 'Kod gönderilemedi';
+        showLoginMessage(`❌ ${reason}`, 'error');
       }
     } catch (e) {
       console.error('Failed to request OTP:', e);
-      showLoginMessage('Hata: OTP istenemedi.', 'error');
+      showLoginMessage('❌ Bağlantı hatası. Tekrar deneyin.', 'error');
     } finally {
       reqOtpBtn.disabled = false;
       reqOtpBtn.classList.remove('loading');
@@ -665,21 +675,23 @@ function syncConversationMessages(convId, messages) {
     event.target.value = '';
   }
   
-  // File input handler
+  // File input handler - FIXED
   const adminFileInput = document.getElementById('adminFileInput');
+  const adminFileBtn = document.getElementById('adminFileBtn');
+  
   if (adminFileInput) {
     adminFileInput.addEventListener('change', handleFileSelect);
   }
   
-  // File upload button handler
-  const adminFileBtn = document.getElementById('adminFileBtn');
-  if (adminFileBtn && adminFileInput) {
+  if (adminFileBtn) {
     adminFileBtn.addEventListener('click', () => {
       if (!selectedConv) {
         showNotificationFunc('Lütfen önce bir sohbet seçin', 'error');
         return;
       }
-      adminFileInput.click();
+      if (adminFileInput) {
+        adminFileInput.click();
+      }
     });
   }
 
